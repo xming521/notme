@@ -43,6 +43,8 @@ notme detects your visible **exit IP**, derives a plausible browser profile from
 | Anti-detection | Spoofed functions report native to both `fn.toString()` and the intrinsic `Function.prototype.toString.call(fn)`; the override payload is not left in the DOM, and no global (like `window.GeoMirrorTZ`) is left for a page to probe. |
 | **Anthropic pages** | On `anthropic.com` / `claude.ai` / `claude.com` (and subdomains) the timezone, locale, and font protections are **forced on regardless of your toggles**, and the spoofed `Accept-Language` header is always sent — so information sent to Anthropic never leaks your real timezone/locale. |
 
+This fork also applies the same always-on timezone, locale, font, and `Accept-Language` protections to [`fuck-claude.app`](https://fuck-claude.app/zh/) and its subdomains. To verify the protected-site behavior, reload the extension and the test page after updating; even with the global timezone, language, and font toggles off, these protections still apply there. Timezone and language spoofing require valid detected or configured override data. Web Worker spoofing remains optional and off by default, as on Claude.
+
 The goal is simple: if your IP looks like Tokyo, the browser should not still look like Shanghai, Los Angeles, or Berlin — and no single `Date` or `Intl` call should quietly give it away.
 
 ## Privacy model
