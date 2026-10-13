@@ -147,10 +147,10 @@ regardless of the popup toggles:
   sets the spoofed `Accept-Language` on requests to Anthropic, independent of the
   language toggle.
 
-This fork includes `fuck-claude.app` and its subdomains in both the content-script
-hostname check and the header rule's `requestDomains`, so the verification site
-receives the same always-on behavior as Anthropic. Unrelated sites continue to
-follow the global toggles.
+This fork includes `fuck-claude.app` and `fuck-claude.vercel.app`, including their
+subdomains, in both the content-script hostname check and the header rule's
+`requestDomains`, so both verification sites receive the same always-on behavior
+as Anthropic. Unrelated sites continue to follow the global toggles.
 
 The experimental Web Worker feature is *not* force-enabled on Anthropic
 (claude.ai is worker-heavy and the blob rewrite could break it); the main-thread

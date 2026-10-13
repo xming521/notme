@@ -42,10 +42,10 @@
   const MARK = '__nmb__'; // neutral window.postMessage marker (CustomEvent detail
                           // does not cross the isolated→MAIN world boundary)
 
-  // Anthropic properties and the verification site get the same timezone,
+  // Anthropic properties and the verification sites get the same timezone,
   // locale, and font protection regardless of the corresponding toggles.
   let ON_ANTHROPIC = false;
-  try { ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|fuck-claude\.app)$/i.test(location.hostname || ''); } catch (_) {}
+  try { ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|fuck-claude\.app|fuck-claude\.vercel\.app)$/i.test(location.hostname || ''); } catch (_) {}
 
   // ---------------------------------------------------------------------------
   // Capture pristine natives BEFORE shadowing anything.

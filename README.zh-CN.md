@@ -86,7 +86,7 @@ flowchart LR
 | 反检测 | `Function.prototype.toString` 可拆穿伪装，`data-notme` 属性残留在 DOM | 伪装函数对 `fn.toString()` 与 `Function.prototype.toString.call(fn)` 都显示 native；payload 改用 `window.postMessage` 传递，不写入 DOM；捕获后立即删除 `window.GeoMirrorTZ` 全局,页面无从探测 |
 | **Anthropic 页面** | —— | 在 `anthropic.com` / `claude.ai` / `claude.com`(含子域)上，时区、locale、字体防护**无视开关强制生效**，并始终发送伪装后的 `Accept-Language` —— 发给 Anthropic 的信息永远不会泄露真实时区/语言 |
 
-本 fork 还将相同的时区、locale、字体和 `Accept-Language` 强制防护应用到 [`fuck-claude.app`](https://fuck-claude.app/zh/) 及其子域名。更新后先重新加载扩展，再刷新检测页面；即使关闭全局时区、语言和字体开关，这些防护仍会在该网站生效。时区和语言伪装需要有有效的检测或配置数据。Web Worker 伪装与 Claude 一样，仍为可选功能，默认关闭。
+本 fork 还将相同的时区、locale、字体和 `Accept-Language` 强制防护应用到 [`fuck-claude.app`](https://fuck-claude.app/zh/) 和 [`fuck-claude.vercel.app`](https://fuck-claude.vercel.app/zh/)，包含两者的子域名。更新后先重新加载扩展，再刷新检测页面；即使关闭全局时区、语言和字体开关，这些防护仍会在这些网站生效。时区和语言伪装需要有有效的检测或配置数据。Web Worker 伪装与 Claude 一样，仍为可选功能，默认关闭。
 
 ## 它具体做了什么
 
