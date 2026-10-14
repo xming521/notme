@@ -91,13 +91,16 @@ an earlier restricted one. Unknown regions remain informational. A latency-only
 warning does not block access; connectivity and selected-profile data still need
 to be usable. `ready` remains false until STUN country lookups finish, and their
 results are tied to a check ID to reject stale completions.
-Confirmation repeats every check before installing an allow rule. UDP probing
+Confirmation uses a completed, ready result directly for 15 seconds, with background-worker
+validation of its age, navigation, settings and selection. Older results trigger
+a fresh check. UDP probing
 and HTTPS/HTTP3 rechecks start together. A one-use, tab-bound token transfers
 the fresh network result to final confirmation; navigation, report or settings
 changes invalidate it. UDP country lookups remain fresh. An allowed
 exit change updates the profile rather than failing an equality check. Changed
-settings or selections invalidate confirmation. A check is valid for at most
-60 seconds.
+settings or selections invalidate confirmation. Prepared recheck tokens expire
+after 60 seconds and cannot be reused. Proxy route changes within the 15-second
+window require a manual check.
 
 Confirmation installs a temporary main-frame allow rule limited to that tab,
 host and extension initiator. `onCommitted` removes it. The tab retains a

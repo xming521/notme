@@ -335,18 +335,23 @@ $('#save-defaults').onclick = async () => {
 };
 $('#confirm').onclick = async () => {
   if (busy || settingsOnly) return;
-  busy = true; $('#confirm').disabled = true; $('#confirm').textContent = '正在复查…';
+  busy = true; $('#confirm').disabled = true; $('#confirm').textContent = '正在进入…';
   const controls = document.querySelectorAll('#choices input, #choices select, #advanced input, .presets button, #save-defaults, #retry');
   for (const input of controls) input.disabled = true;
   try {
-    const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
     const chosen = selection();
-    const [token, udp] = await Promise.all([
-      send('PREPARE_CONFIRM', { navigationId, selection: chosen }),
-      NotmeUDP.probe({ policy: policy.value }),
-    ]);
-    $('#confirm').textContent = '正在确认出口…';
-    const destination = await send('CONFIRM', { navigationId, selection: chosen, udp, token }); location.replace(destination);
+    let destination = await send('CONFIRM', { navigationId, selection: chosen });
+    if (destination?.recheck) {
+      $('#confirm').textContent = '正在复查…';
+      const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
+      const [token, udp] = await Promise.all([
+        send('PREPARE_CONFIRM', { navigationId, selection: chosen }),
+        NotmeUDP.probe({ policy: policy.value }),
+      ]);
+      $('#confirm').textContent = '正在确认出口…';
+      destination = await send('CONFIRM', { navigationId, selection: chosen, udp, token });
+    }
+    location.replace(destination);
   }
   catch (error) {
     const view = await send('STATE');

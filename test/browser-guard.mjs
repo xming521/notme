@@ -156,6 +156,13 @@ try {
     await page.getByRole('button', { name: '确认并访问', exact: true }).waitFor();
     await wait(async () => await page.locator('#retry').isEnabled());
   };
+  const ageCheck = async (page, age = 16000) => {
+    const id = await page.evaluate(async()=> (await chrome.tabs.getCurrent()).id);
+    await worker.evaluate(async({id,age})=>{
+      const view=await NotmeGuard.message({type:'NOTME_GUARD_STATE',tabId:id},{id:chrome.runtime.id,url:chrome.runtime.getURL('gate.html')});
+      view.report.checkedAt=Date.now()-age;
+    },{id,age});
+  };
   const confirm = async (page) => {
     await page.getByRole('button', { name: '确认并访问', exact: true }).click();
     await page.locator('#formal').waitFor();
@@ -239,7 +246,11 @@ try {
   await page.waitForTimeout(200);
   assert.equal(formalRequests().length, 0);
   pass('检查通过后仍等待明确确认，正式 HTML / 脚本 / 资源请求数为零');
+  traffic.length=0;const udpBeforeQuickConfirm=udpRequests;
   await confirm(page);
+  assert.equal(traffic.some(item=>item.path==='/cdn-cgi/trace'),false);
+  assert.equal(udpRequests,udpBeforeQuickConfirm);
+  pass('检查完成 15 秒内确认直接进入，不重复 HTTPS 或 UDP 探测');
   const first = await page.evaluate(() => window.first);
   assert.equal(first.language, 'en-US'); assert.equal(first.zone, 'America/Los_Angeles'); assert.equal(first.hash, '#original');
   assert.ok(!first.ua.includes('HeadlessChrome'));
@@ -256,6 +267,7 @@ try {
   pass('默认拒绝定位，getCurrentPosition、watchPosition 和继承框架都不返回坐标，且不查询住宅街道或地址');
 
   const parallelConfirm=await context.newPage();await openGate(parallelConfirm,'https://claude.ai/parallel-confirm');
+  await ageCheck(parallelConfirm,61000);
   await parallelConfirm.evaluate(()=>{
     const original=NotmeUDP.probe;
     NotmeUDP.probe=async options=>{await new Promise(resolve=>window.releaseUDP=resolve);return original(options);};
@@ -411,6 +423,7 @@ try {
 
   traffic.length = 0; await openGate(another, 'https://claude.ai/changed');
   policies.set('claude.ai', { country: 'JP', ip: '203.0.113.43' });
+  await ageCheck(another);
   await confirm(another);
   assert.equal((await another.evaluate(()=>window.first)).zone,'Asia/Tokyo');
   assert.equal((await another.evaluate(()=>window.first)).language,'ja-JP');
@@ -615,6 +628,7 @@ try {
 
   traffic.length=0;await openGate(another,'https://claude.ai/confirm-third-party-region');
   policies.set(Network.HTTP3_TEST_HOST,{protocol:'http/2',country:'HK',ip:'203.0.113.99'});
+  await ageCheck(another);
   await another.getByRole('button',{name:'确认并访问',exact:true}).click();
   await another.locator('#error').getByText('检测到中国大陆 / 香港出口，禁止访问；请重新检查').waitFor();
   assert.equal(await another.locator('#confirm').isEnabled(),false);
@@ -626,6 +640,7 @@ try {
   traffic.length=0;await openGate(another,'https://claude.ai/confirm-stun-region');
   assert.equal(await another.locator('#confirm').isEnabled(),true);
   policies.set('ipwho.is/203.0.113.99',{country:'CN'});
+  await ageCheck(another);
   await another.getByRole('button',{name:'确认并访问',exact:true}).click();
   await another.locator('#error').getByText('检测到中国大陆 / 香港出口，禁止访问；请重新检查').waitFor();
   assert.equal(await another.locator('#confirm').isEnabled(),false);
