@@ -28,7 +28,7 @@ listed below, using the data needed for those checks.
    OS family. Anthropic pages and the two verification hosts use per-visit choices. Other sites,
    except the two listed verification sites, retain native APIs.
 6. Declarative rules modify language and identity headers only on approved
-   Anthropic destination requests and the two exact verification hosts. Browser/device masking adds no network endpoints or telemetry.
+   Anthropic destination requests and the two exact verification hosts. Third-party pages can also request temporary header spoofing through the review page after destination checks and explicit confirmation. This asks for optional access to the source origin and scopes rules to the source tab and reviewed destination hosts. Rules are removed when the source page reloads, leaves or closes; browser-granted origin access can remain until revoked in extension settings. Source-page JavaScript and request bodies are not rewritten. Browser/device masking adds no network endpoints or telemetry.
 7. Before an Anthropic navigation, the local check page requests the target
    host's `/cdn-cgi/trace` three times without cookies, credentials or a referrer.
    Confirmation repeats this probe. The target's reported exit IP is used for an
