@@ -27,7 +27,7 @@ const DEFAULT_SETTINGS = {
                           // workers that rely on self.location. Opt in if you need it.
   manualTz: '',           // fallback IANA timezone used when exit-IP detection fails
                           // (or a provider returns no timezone). Empty = auto only.
-  networkWarnMs: 500,
+  networkWarnMs: 1500,
 };
 
 const ALARM = 'refresh';
@@ -57,7 +57,14 @@ async function clearLegacyEffects() {
   await chrome.storage.session.remove('guardWebRTCProtect');
   if (chrome.privacy?.network?.webRTCIPHandlingPolicy) await chrome.privacy.network.webRTCIPHandlingPolicy.clear({});
 }
-const legacyCleanup = clearLegacyEffects();
+async function migrateNetworkWarning() {
+  const { settings, networkWarnDefaultMigrated } = await chrome.storage.local.get(['settings', 'networkWarnDefaultMigrated']);
+  if (networkWarnDefaultMigrated) return;
+  const patch = { networkWarnDefaultMigrated: true };
+  if (settings?.networkWarnMs === 500) patch.settings = { ...settings, networkWarnMs: DEFAULT_SETTINGS.networkWarnMs };
+  await chrome.storage.local.set(patch);
+}
+const legacyCleanup = Promise.all([clearLegacyEffects(), migrateNetworkWarning()]);
 
 /** Build an override from the user's manual timezone (fallback when the exit-IP
  *  path can't confirm a timezone). Coordinates come from the timezone's profile

@@ -195,7 +195,7 @@ All choices apply only to Anthropic visits. Updating to 1.8.2 clears the legacy 
 - **Reported accuracy (m)** — reported GPS accuracy, default 30 m.
 - **Auto-refresh interval (minutes)** — how often notme re-detects the exit IP.
 - **ipinfo.io token (optional)** — improves fallback reliability if you have a token.
-- **Network warning threshold (ms)** — maximum average probe latency for Anthropic admission; default 500 ms.
+- **Network warning threshold (ms)** — maximum average probe latency for Anthropic admission; default 1500 ms. Upgrades migrate the previous 500 ms default once; other saved thresholds are preserved.
 
 ## Claude Code (terminal): a separate timezone channel
 

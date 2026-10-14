@@ -134,7 +134,7 @@ async function main() {
     const ctx=vm.createContext({
       navigator:{userAgent:'Chrome/140.0.0.0 QQBrowser/20',platform:'Win32'},importScripts(){},
       chrome:{
-        storage:{local:{async set(value){Object.assign(stored,plain(value));}},session:{async remove(key){delete session[key];}}},
+        storage:{local:{async get(){return plain(stored);},async set(value){Object.assign(stored,plain(value));}},session:{async remove(key){delete session[key];}}},
         declarativeNetRequest:{async updateDynamicRules(value){for(const id of value.removeRuleIds)rules.delete(id);for(const rule of value.addRules)rules.set(rule.id,rule);}},
         privacy:{network:{webRTCIPHandlingPolicy:{async clear(){controlled=false;}}}},
         runtime:{onInstalled:listener,onStartup:listener,onMessage:listener},alarms:{onAlarm:listener},action:{onClicked:listener},
