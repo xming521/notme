@@ -21,14 +21,14 @@ listed below, using the data needed for those checks.
 3. It optionally asks BigDataCloud for a human-readable address of that point,
    purely so the environment page can display it.
 4. A content script injects the chosen coordinate into `navigator.geolocation`
-   only on selected Anthropic pages. Other sites remain native.
+   only on selected Anthropic pages and the two listed verification sites. Other sites remain native.
 5. Page scripts also apply the configured timezone, locale, and font protections.
    Browser/device masking presents ordinary Chrome/Chromium brands and an empty
    device model, using a generic profile for the reported Chromium version and
    OS family. Only Anthropic pages use the per-visit choices. Other sites,
-   including verification sites, retain native APIs.
+   except the two listed verification sites, retain native APIs.
 6. Declarative rules modify language and identity headers only on approved
-   Anthropic destination requests. Browser/device masking adds no network endpoints or telemetry.
+   Anthropic destination requests and the two exact verification hosts. Browser/device masking adds no network endpoints or telemetry.
 7. Before an Anthropic navigation, the local check page requests the target
    host's `/cdn-cgi/trace` three times without cookies, credentials or a referrer.
    Confirmation repeats this probe. The target's reported exit IP is used for an
@@ -70,8 +70,8 @@ listed below, using the data needed for those checks.
 These are the background endpoints used by the extension. Explicit destination-IP
 and STUN-IP lookups send those observed IPs to `ipwho.is`, `ipapi.co`, or `ipinfo.io`; these
 services may see a different source IP under split routing. Host access is
-limited to the seven Anthropic roots and listed IP/map providers. Content
-scripts match only Anthropic origins and inherited-origin frames.
+limited to the seven Anthropic roots, the two verification hosts and listed diagnostic providers. Content
+scripts match Anthropic origins, the two exact verification hosts and inherited-origin frames.
 
 ## What is stored, and where
 
@@ -107,10 +107,10 @@ scripts match only Anthropic origins and inherited-origin frames.
 
 ## A note on trust
 
-Content scripts run only on the seven Anthropic roots and their subdomains.
+Content scripts run on the seven Anthropic roots and their subdomains, plus the exact hosts `fuck-claude.vercel.app` and `fuck-claude.app`. Verification sites receive the cached environment and saved default choices without a navigation gate. Their language and identity headers are modified only when selected; no other Vercel hosts are included.
 Host permissions additionally allow the public IP/geolocation/map endpoints.
 The scripts do not read page contents. Header rules apply only to approved
-Anthropic destinations. On upgrade, old global header rules and notme's old
+Anthropic destinations and the two exact verification hosts. On upgrade, old global header rules and notme's old
 WebRTC privacy override are removed.
 
 `tabs` and `webNavigation` associate the pending URL and admission rules with

@@ -225,7 +225,7 @@ test('Anthropic domains have navigation profile handling', () => {
   const roots = require('../lib/network.js').ROOT_DOMAINS;
   assert(['anthropic.com', 'claude.ai', 'claude.com'].every(domain => roots.includes(domain)), 'Anthropic domains must be listed');
   for (const script of require('../manifest.json').content_scripts) {
-    eq(script.matches, roots.map(host => '*://*.' + host + '/*'));
+    eq(script.matches, [...roots.map(host => '*://*.' + host + '/*'), ...require('../lib/network.js').VERIFICATION_DOMAINS.map(host => '*://' + host + '/*')]);
   }
   const inj = fs.readFileSync(path.join(__dirname, '..', 'content-inject.js'), 'utf8');
   assert(/ON_ANTHROPIC/.test(inj), 'injector must recognize Anthropic domains');

@@ -1,6 +1,6 @@
 # notme
 
-> 让浏览器画像与当前出口 IP 保持一致：地理位置、时区、语言、`Accept-Language` —— 仅用于确认后的 Anthropic / Claude 页面。
+> 让浏览器画像与当前出口 IP 保持一致：地理位置、时区、语言、`Accept-Language` —— 用于确认后的 Anthropic / Claude 页面及指定的两个检测站。
 
 notme 是一个 Chrome Manifest V3 扩展，适合使用代理、VPN、远程桌面、跨区出口节点的人。它解决的问题不是“换 IP”，而是“换了 IP 之后，浏览器仍然暴露出另一个地区的环境”。
 
@@ -12,9 +12,9 @@ notme 是一个 Chrome Manifest V3 扩展，适合使用代理、VPN、远程桌
 
 每次打开或刷新 Anthropic 网址，先进入本地环境选择页。可以选择 **使用 notme 伪装**、**全部使用系统默认**，也可以逐项自定义。静态规则提前拦截正式 HTML 和子资源；检查全部通过后，还需要你点击 **确认并访问**。以前访问过、其他标签页已放行，都不能代替这次确认。
 
-工具栏图标和访问前检查现在打开同一个中文页面：七项环境开关与时区选择在一起，网络详情和高级设置默认收起，失败原因自动展开。时区、延迟阈值、定位精度、刷新间隔和可选 Token 修改后自动保存，并重新检查；点击 **保存为默认** 可记住当前七项选择，仅用于下一次 Anthropic / Claude 访问。保存配置不会代替访问确认。延迟警告阈值默认 1500 ms；升级时仅将旧默认值 500 ms 迁移一次，其他已保存的阈值保留。
+工具栏图标和访问前检查现在打开同一个中文页面：七项环境开关与时区选择在一起，网络详情和高级设置默认收起，失败原因自动展开。时区、延迟阈值、定位精度、刷新间隔和可选 Token 修改后自动保存，并重新检查；点击 **保存为默认** 可记住当前七项选择，用于下一次 Anthropic / Claude 访问和指定检测站。保存配置不会代替访问确认。延迟警告阈值默认 1500 ms；升级时仅将旧默认值 500 ms 迁移一次，其他已保存的阈值保留。
 
-覆盖 `anthropic.com`、`claude.ai`、`claude.com`、`claude.app`、`claudeusercontent.com`、`claudemcpcontent.com`、`claude.site` 及它们的所有子域。其他网站（包括浏览器指纹检测站）保持系统原生环境。
+覆盖 `anthropic.com`、`claude.ai`、`claude.com`、`claude.app`、`claudeusercontent.com`、`claudemcpcontent.com`、`claude.site` 及它们的所有子域。`fuck-claude.vercel.app` 与 `fuck-claude.app` 也使用环境页 **保存为默认** 的配置，七项开关独立生效。检测站直接打开，不进入 Anthropic 访问闸门；等待缓存环境加载完成后开始扫描。只匹配这两个完整域名，其他网站和 Vercel 应用保持原生环境。
 
 每次检查向实际目标域名的 `/cdn-cgi/trace` 发起三次不带 Cookie 的 HTTPS 请求，并检查第三方测试站、查 IP 服务和允许执行的 STUN 探测。**地区限制只有中国大陆（`CN`）与香港（`HK`）：任何来源、任何一次有效检测发现这两个地区的 IP 都禁止访问。** 出口 IP 不同可能由分流产生，只作信息说明，不判定异常；地区未知显示未确认，不冒充已验证。纯延迟警告不会阻止访问。自动伪装仍需要目标 IP 的可用地理数据，系统默认无需伪装数据。点击确认时再次检查所有来源，发现限制地区仍会拦截；换成其他地区的出口会更新本次环境，设置改变或超过一分钟则需重新检查。
 
@@ -98,14 +98,14 @@ flowchart LR
 | **整个 `Date` 本地时间面** | 只有 `getTimezoneOffset` 被改，`getHours`/`toString`/`toLocaleString` 等仍暴露本机时区 | `getTimezoneOffset` **以及** 所有本地 getter/setter、`toString`/`toDateString`/`toTimeString`、`toLocale*`、数字构造函数、无偏移量字符串解析、`Date()` 函数调用，全部按出口 IP 时区（含 DST）计算 |
 | Intl 时区 | 本机系统时区 | 出口 IP 对应时区（即使传入 locale 也注入） |
 | navigator 语言 | 本机语言 | 根据国家码 + 时区推断 |
-| 浏览器 / 设备品牌 | UA、UA-CH 中的国产浏览器标识和设备型号 | 显示普通 Chrome/Chromium 品牌，隐藏设备型号，并同步 `User-Agent` 与相关 Client Hints 请求头；仅按本次 Anthropic / Claude 访问的选择生效 |
+| 浏览器 / 设备品牌 | UA、UA-CH 中的国产浏览器标识和设备型号 | 显示普通 Chrome/Chromium 品牌，隐藏设备型号，并同步 `User-Agent` 与相关 Client Hints 请求头；按本次 Anthropic / Claude 访问的选择及两个检测站保存的默认配置生效 |
 | Intl 默认 locale | 本机 locale | `DateTimeFormat`/`NumberFormat`/`Collator`/`RelativeTimeFormat`/`PluralRules`/`ListFormat`/`DisplayNames`/`Segmenter`/`DurationFormat` + `Number`/`Array`/`BigInt.toLocaleString` 全部一致 |
-| Accept-Language | 本机请求头语言，且仅主/子框架和 XHR 生效 | 仅修改已确认的 Anthropic 目标请求，覆盖**所有**资源类型（图片/字体/脚本/beacon 等） |
+| Accept-Language | 本机请求头语言，且仅主/子框架和 XHR 生效 | 修改已确认的 Anthropic 目标及两个检测站请求，覆盖**所有**资源类型（图片/字体/脚本/beacon 等） |
 | WebRTC IP | 可能绕过代理泄露真实 IP | 仅在目标网站禁用 WebRTC 连接，其他网站保持默认；会影响本站依赖 WebRTC 的音视频功能 |
 | 反检测 | `Function.prototype.toString` 可拆穿伪装，`data-notme` 属性残留在 DOM | 伪装函数对 `fn.toString()` 与 `Function.prototype.toString.call(fn)` 都显示 native；payload 改用 `window.postMessage` 传递，不写入 DOM；捕获后立即删除 `window.GeoMirrorTZ` 全局,页面无从探测 |
 | **Anthropic 页面** | —— | 七个保护主域及所有子域先选择环境、检查网络，再确认访问；各项可单独选择伪装或系统默认 |
 
-脚本只在七个 Anthropic 主域及其子域运行。其他网站和指纹检测站保持原生环境；Web Worker 伪装仍为可选功能，默认关闭。
+脚本在七个 Anthropic 主域及其子域、上述两个检测站运行。其他网站保持原生环境；Web Worker 伪装仍为可选功能，默认关闭。
 
 WebRTC 保护仅在选定网站禁用连接，不再修改浏览器全局策略。
 
@@ -206,7 +206,7 @@ Edge 支持 notme 用到的所有 `chrome.*` API（`declarativeNetRequest`、`al
 
 ## 验证效果
 
-在已确认的 Anthropic 页面控制台检查这些值；其他域名的检测站显示系统原生环境：
+在已确认的 Anthropic 页面控制台检查这些值；上述两个检测站按保存的默认配置伪装，其他检测站显示系统原生环境：
 
 ```js
 navigator.language
@@ -229,7 +229,7 @@ navigator.geolocation.getCurrentPosition(console.log, console.error)
 - **Location spoof**：启用/关闭地理位置伪装。
 - **Timezone spoof**：启用/关闭 `Date` 和 `Intl` 时区伪装。
 - **Language spoof**：启用/关闭 `navigator.language(s)`、Intl locale、`Accept-Language`。
-- **浏览器与设备标识**：仅按本次 Anthropic / Claude 访问选择，伪装 UA、UA-CH、设备型号和对应请求头。
+- **浏览器与设备标识**：按本次 Anthropic / Claude 访问选择或检测站保存的默认配置，伪装 UA、UA-CH、设备型号和对应请求头。
 - **IP 防泄漏（WebRTC）**：仅在本站禁用 WebRTC 连接，默认开启；选择系统默认可使用原生 WebRTC。会影响本站依赖 WebRTC 的音视频功能，其他网站不受影响。
 - **Hide CJK fonts**：把暴露操作系统/地区的中文字体(微软雅黑、苹方、宋体、黑体…简繁都含)从 canvas `measureText` 和 DOM 宽度探测里剥掉，让它们读起来像"未安装"。默认开启。
 - **Spoof in Web Workers（实验性）**：把时区/语言伪装扩展到专用 Web Worker(指纹站常在 worker 里读真实时区来绕过主线程伪装)。**默认关闭** —— 它通过 blob 垫片重新加载 worker 代码,可能破坏依赖 `self.location` 的 WASM/打包 worker。它会探测 CSP 是否允许 `blob:`,被拦时回退到原生 worker(不会静默弄坏 worker),但请仅在你确实需要 worker 级时区隐藏时开启;某站点 worker 出问题就关掉它。
@@ -262,8 +262,8 @@ cd tools/claude-tz && bash install.sh          # macOS / Linux / WSL（zsh/bash/
 | `alarms` | 定时刷新出口 IP。 |
 | `declarativeNetRequest` | 设置 outgoing `Accept-Language`、`User-Agent` 和身份 Client Hints 请求头，不读取请求正文。 |
 | `privacy` | 读取现有策略用于 UDP 诊断，并释放旧版留下的浏览器全局 WebRTC 控制。新保护仅在目标页面生效。 |
-| 仅 Anthropic 的内容脚本 | 在七个保护主域及子域、继承其 origin 的框架中应用所选环境。 |
-| 限定的主机权限 | 仅访问 Anthropic 目标和已列出的 IP、地理位置、地图服务，排除其他网站。 |
+| 限定站点的内容脚本 | 在七个保护主域及子域、指定的两个检测站和继承其 origin 的框架中应用所选环境。 |
+| 限定的主机权限 | 仅访问 Anthropic 目标、指定的两个检测站和已列出的诊断服务。 |
 
 ## 如果你不想安装这个扩展
 
@@ -299,9 +299,9 @@ cd tools/claude-tz && bash install.sh          # macOS / Linux / WSL（zsh/bash/
 这些在旧版本中都是真实存在的漏洞，现已修复：
 
 - **`Date` 自相矛盾**：旧版只伪装了 `getTimezoneOffset()` 和 `Intl.DateTimeFormat`，`new Date().getHours()`、`.toString()`（会显示 `… GMT+0800 (China Standard Time)`）、`.toLocaleString()`、`Number.prototype.toLocaleString` 以及大部分 `Intl.*` 仍然泄露本机时区/语言 —— 一行交叉校验就能拆穿。现在整个 `Date` 本地时间面和所有与 locale 相关的 `Intl` 构造函数都按出口 IP 时区计算。
-- **`Accept-Language` 实际没生效**：`declarativeNetRequest` 的 `modifyHeaders` 需要对访问站点的主机权限，而旧 manifest 只列了 IP 接口域名，所以规则在真实网站上被跳过。现在主机权限限定在 Anthropic 和诊断服务，且规则覆盖**所有**资源类型（旧版只覆盖主/子框架和 XHR，图片/字体/脚本/beacon 仍泄露真实语言）。
+- **`Accept-Language` 实际没生效**：`declarativeNetRequest` 的 `modifyHeaders` 需要对访问站点的主机权限，而旧 manifest 只列了 IP 接口域名，所以规则在真实网站上被跳过。现在主机权限限定在 Anthropic、两个检测站和诊断服务，且规则覆盖**所有**资源类型（旧版只覆盖主/子框架和 XHR，图片/字体/脚本/beacon 仍泄露真实语言）。
 - **`Intl.DateTimeFormat` 丢弃时区**：无 locale 路径存在一个位置参数 bug，导致仅开时区伪装、关语言伪装时泄露本机时区。已修复。
-- **WebRTC 可能绕过代理泄露真实 IP**：现在仅在选定的 Anthropic 页面禁用 WebRTC 连接。
+- **WebRTC 可能绕过代理泄露真实 IP**：现在按所选配置在 Anthropic 页面和两个检测站禁用 WebRTC 连接。
 - **反检测**：`Function.prototype.toString.call(fn)` 曾会返回 wrapper 源码；payload 曾以 `<html data-notme>` 明文留在 DOM；`permissions.query` 曾返回普通对象。均已修复。
 - **不透明来源框架**：`about:blank` / `srcdoc` / `data:` / `blob:` 子框架现在也会被 patch（`match_origin_as_fallback`）。
 

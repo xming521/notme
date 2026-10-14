@@ -46,11 +46,13 @@
                           // does not cross the isolated→MAIN world boundary)
 
   let ON_ANTHROPIC = false;
+  let ON_VERIFICATION = false;
   try {
     const host = location.hostname || new URL(window.origin).hostname;
     ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|claude\.app|claudeusercontent\.com|claudemcpcontent\.com|claude\.site)\.?$/i.test(host);
+    ON_VERIFICATION = /^(fuck-claude\.vercel\.app|fuck-claude\.app)\.?$/i.test(host);
   } catch (_) {}
-  if (!ON_ANTHROPIC) return;
+  if (!ON_ANTHROPIC && !ON_VERIFICATION) return;
 
   // ---------------------------------------------------------------------------
   // Capture pristine natives BEFORE shadowing anything.

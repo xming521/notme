@@ -98,15 +98,15 @@ async function main() {
     assert.throws(() => vm.runInContext("Object.getOwnPropertyDescriptor(Object.getPrototypeOf(navigator), 'userAgent').get.call({})", ctx));
     assert.equal(vm.runInContext('Function.prototype.toString.call(navigator.userAgentData.getHighEntropyValues)', ctx), 'function getHighEntropyValues() { [native code] }');
   });
-  await test('unrelated, verification and lookalike domains stay native even with legacy global toggles', async () => {
-    for (const host of ['outside.test', 'claude.ai.outside.test', 'fakeanthropic.com', 'fuck-claude.app', 'www.fuck-claude.vercel.app']) {
+  await test('unrelated, unlisted verification and lookalike domains stay native even with legacy global toggles', async () => {
+    for (const host of ['outside.test', 'claude.ai.outside.test', 'fakeanthropic.com', 'fuck-claude.app.evil.test', 'www.fuck-claude.vercel.app', 'other.vercel.app']) {
       const ctx = page(host, 'Chrome/140.0.0.0 QQBrowser/20', 'Win32', 'HUAWEI P60');
       vm.runInContext('publish({identityEnabled:true,langEnabled:true,tzEnabled:true})', ctx);
       assert(snapshot(ctx).ua.includes('QQBrowser'),host);
       assert.equal((await vm.runInContext("navigator.userAgentData.getHighEntropyValues(['model'])", ctx)).model,'HUAWEI P60');
       assert.equal(vm.runInContext('navigator.language',ctx),'zh-CN');
     }
-    for (const host of ['claude.ai','api.anthropic.com','claude.com','brandnew.claude.site','']) {
+    for (const host of ['claude.ai','api.anthropic.com','claude.com','brandnew.claude.site','fuck-claude.app','fuck-claude.vercel.app','']) {
       const ctx = page(host,'Chrome/140.0.0.0 QQBrowser/20','Win32','HUAWEI P60','https://claude.ai');
       vm.runInContext('publish({guardSelection:true,identityEnabled:false})',ctx);
       assert(snapshot(ctx).ua.includes('QQBrowser'));
@@ -142,8 +142,13 @@ async function main() {
     });
     ctx.self=ctx;
     for(const file of ['lib/network.js','lib/environment.js','lib/identity.js','background.js'])vm.runInContext(read(file),ctx);
-    await vm.runInContext('legacyCleanup',ctx);
-    assert.deepEqual([...rules.keys()],[501]);assert.equal(controlled,false);
+    await vm.runInContext('verificationReady',ctx);
+    assert.deepEqual([...rules.keys()],[501,19000,19001]);
+    for(const [index,host] of require('../lib/network.js').VERIFICATION_DOMAINS.entries()){
+      const filter=new RegExp(rules.get(19000+index).condition.regexFilter);
+      assert(filter.test('https://'+host+'/'));
+      assert(!filter.test('https://sub.'+host+'/'));assert(!filter.test('https://'+host+'.evil.test/'));
+    }assert.equal(controlled,false);
     assert.equal(session.guardWebRTCProtect,undefined);
     assert(!stored.identityProfile.userAgent.includes('QQBrowser'));
   });

@@ -21,7 +21,7 @@ The extension currently spoofs:
 - default locale for `Intl.DateTimeFormat`, `NumberFormat`, `Collator`, `RelativeTimeFormat`, `PluralRules`, `ListFormat`, `DisplayNames`, `Segmenter`, `DurationFormat`
 - `Number`/`Array`/`BigInt.prototype.toLocaleString`
 - outgoing `Accept-Language` header on all resource types via Chrome `declarativeNetRequest`
-- WebRTC connections disabled only on the selected Anthropic page (optional); other origins retain native WebRTC
+- WebRTC connections disabled on selected Anthropic pages and the two verification hosts (optional); other origins retain native WebRTC
 - timezone + locale inside dedicated Web Workers (optional; see below)
 - CJK font width probing on canvas `measureText` and DOM `getBoundingClientRect`/`getClientRects`/`offsetWidth`/`offsetHeight` (optional; see below)
 - `Function.prototype.toString` (so spoofed functions read as native)
@@ -105,7 +105,7 @@ independent switches. `lib/environment.js` normalizes those choices; only chosen
 location/timezone/language surfaces need geographic profile data. Forced timezones
 use `buildManualOverride` from the cached notme workflow. A selection signature rejects
 outdated checks when the user changes controls during a probe. WebRTC uses
-a constructor guard only on Anthropic pages. It blocks connections when selected;
+a constructor guard on Anthropic pages and the two verification hosts. It blocks connections when selected;
 other origins retain native WebRTC. Old browser-wide control is cleared on startup.
 
 For the first protected document, the gate carries the checked profile in a URL
@@ -198,7 +198,7 @@ profile. Native hint validation and permission checks run first. Unrelated
 high-entropy fields, such as architecture and platform version, are retained.
 
 Identity masking follows the per-visit choice only on Anthropic origins and
-inherited-origin frames. Ordinary sites and verification sites are not injected.
+inherited-origin frames. The exact verification hosts `fuck-claude.vercel.app` and `fuck-claude.app` instead use saved defaults; other sites are not injected.
 
 DNR rules synchronize `User-Agent`, `Sec-CH-UA`, `Sec-CH-UA-Mobile`,
 `Sec-CH-UA-Platform`, `Sec-CH-UA-Model`, `Sec-CH-UA-Full-Version`, and
@@ -276,8 +276,14 @@ switches can restore any surface to the browser default:
 - **Header.** Per-tab rules modify only requests to the seven protected roots.
   Only explicitly selected language and identity values are applied.
 
-Ordinary sites and verification sites retain native APIs and headers. The bridge
-publishes only the tab's admitted profile, never the global cached environment.
+Other sites retain native APIs and headers. On the two exact verification hosts,
+the bridge requests `NOTME_VERIFICATION_PROFILE`, which combines the cached
+environment with `guardDefaults`. Local storage changes update their page profile.
+Dynamic header rules 19000 and 19001 use exact host regexes and are refreshed on
+startup, settings changes and profile refresh; they never match subdomains or
+other Vercel applications. Verification sites open directly and receive profile
+data asynchronously, so scans should start after the environment is loaded.
+Anthropic pages continue to receive only their admitted tab profile.
 
 The experimental Web Worker feature is *not* force-enabled on Anthropic
 (claude.ai is worker-heavy and the blob rewrite could break it); the main-thread

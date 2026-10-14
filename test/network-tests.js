@@ -15,6 +15,17 @@ test('主域及新子域受保护，仿冒域名不匹配', () => {
     assert.equal(Network.protectedHost(`https://evil${root}/`), null);
   }
 });
+test('两个检测站仅匹配指定域名，不扩大到子域或整个 Vercel 平台，也不进入 Anthropic 闸门', () => {
+  for (const host of Network.VERIFICATION_DOMAINS) {
+    assert.equal(Network.verificationHost(`https://${host}/scan`), host);
+    assert.equal(Network.verificationHost(`https://${host.toUpperCase()}./`), host);
+    assert.equal(Network.protectedHost(`https://${host}/`), null);
+    for (const value of [`https://sub.${host}/`, `https://${host}.evil.test/`, `ftp://${host}/`]) {
+      assert.equal(Network.verificationHost(value), null);
+    }
+  }
+  assert.equal(Network.verificationHost('https://other.vercel.app/'), null);
+});
 test('地区限制只拦截中国大陆和香港，出口不同或地区未知不作为地区封禁', () => {
   assert.equal(Network.assessProbes('claude.ai', [probe(), probe(), probe()]).status, 'ok');
   assert.equal(Network.assessProbes('claude.ai', [probe(), probe('HK'), probe()]).status, 'fail');

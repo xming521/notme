@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "notme",
-  "version": "1.8.4",
+  "version": "1.8.5",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx8m4hr45KNVCzoMPazFrmfvwRLO7k1123FqzLv4WcMkzEeD/kCq/tddkmVXi2fsT1gTJfg/aok5S06icg6hiuP9TmAfm11+hBPxX4t7MPkMLuiVm1oAuz7U0/142EPia2dLDBugbxN5+NZ4qIy1Tu9SFaF0vbVXEJPMgBV7G+1NCKj6HCFdYUQrH4yui3MXWo9wklUgK8AJyIVQFfJGynL1CAL3mWTnMzYQK5vXD02ohUfl6LGsfTmPhGP0Fu3wHUuSgpUYD4IG/2dnW5pzbs8r8OBHZNa1Ttl9Sazi4i36kvEcNdSaBGLGupvELfyowyhoi+tuqZkfaXWkJO/mOXwIDAQAB",
   "description": "Choose native or spoofed browser signals before each Anthropic visit; align location, timezone, language and browser identity.",
   "minimum_chrome_version": "119",
@@ -14,7 +14,7 @@
     "webNavigation",
     "browsingData"
   ],
-  "host_permissions": ["*://*.anthropic.com/*","*://*.claude.ai/*","*://*.claude.com/*","*://*.claude.app/*","*://*.claudeusercontent.com/*","*://*.claudemcpcontent.com/*","*://*.claude.site/*","https://reallyfreegeoip.org/*","https://ipwho.is/*","https://ipapi.co/*","https://ipinfo.io/*","https://overpass-api.de/*","https://overpass.kumi.systems/*","https://maps.mail.ru/*","https://api.bigdatacloud.net/*","https://cloudflare-quic.com/*"],
+  "host_permissions": ["*://*.anthropic.com/*","*://*.claude.ai/*","*://*.claude.com/*","*://*.claude.app/*","*://*.claudeusercontent.com/*","*://*.claudemcpcontent.com/*","*://*.claude.site/*","https://reallyfreegeoip.org/*","https://ipwho.is/*","https://ipapi.co/*","https://ipinfo.io/*","https://overpass-api.de/*","https://overpass.kumi.systems/*","https://maps.mail.ru/*","https://api.bigdatacloud.net/*","https://cloudflare-quic.com/*","*://fuck-claude.vercel.app/*","*://fuck-claude.app/*"],
   "background": {
     "service_worker": "background.js"
   },
@@ -27,7 +27,7 @@
   ] }],
   "content_scripts": [
     {
-      "matches": ["*://*.anthropic.com/*","*://*.claude.ai/*","*://*.claude.com/*","*://*.claude.app/*","*://*.claudeusercontent.com/*","*://*.claudemcpcontent.com/*","*://*.claude.site/*"],
+      "matches": ["*://*.anthropic.com/*","*://*.claude.ai/*","*://*.claude.com/*","*://*.claude.app/*","*://*.claudeusercontent.com/*","*://*.claudemcpcontent.com/*","*://*.claude.site/*","*://fuck-claude.vercel.app/*","*://fuck-claude.app/*"],
       "js": [
         "lib/timezone.js",
         "lib/identity.js",
@@ -39,7 +39,7 @@
       "match_origin_as_fallback": true
     },
     {
-      "matches": ["*://*.anthropic.com/*","*://*.claude.ai/*","*://*.claude.com/*","*://*.claude.app/*","*://*.claudeusercontent.com/*","*://*.claudemcpcontent.com/*","*://*.claude.site/*"],
+      "matches": ["*://*.anthropic.com/*","*://*.claude.ai/*","*://*.claude.com/*","*://*.claude.app/*","*://*.claudeusercontent.com/*","*://*.claudemcpcontent.com/*","*://*.claude.site/*","*://fuck-claude.vercel.app/*","*://fuck-claude.app/*"],
       "js": [
         "content-bridge.js"
       ],

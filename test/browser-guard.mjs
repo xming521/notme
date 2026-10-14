@@ -245,11 +245,49 @@ try {
   pass('点击确认后才加载网站；第一个内联脚本已获得正确时区、语言与标识，HTTP 头同步');
 
   const outside=await context.newPage();
-  for(const host of ['outside.test','claude.ai.evil.test','fakeanthropic.com','fuck-claude.app','fuck-claude.vercel.app']) {
+  for(const host of ['outside.test','claude.ai.evil.test','fakeanthropic.com','fuck-claude.app.evil.test','www.fuck-claude.vercel.app','other.vercel.app']) {
     await verifyOrdinary(outside,`https://${host}/native-scope`);
   }
   await outside.close();
-  pass('普通网站、仿冒域名和检测站的语言、时区、设备、GPS、字体、Worker、WebRTC 及请求头都保持原生');
+  pass('普通网站、仿冒域名及未列入的 Vercel 网站保持原生 API 和请求头');
+
+  const verification = await context.newPage();
+  for (const host of Network.VERIFICATION_DOMAINS) {
+    await verification.goto(`https://${host}/verification-default`);
+    await verification.locator('#formal').waitFor();
+    await wait(async()=>await verification.evaluate(()=>navigator.language==='en-US'));
+    assert.equal(await verification.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone),'America/Los_Angeles');
+    const header=traffic.findLast(item=>item.host===host&&item.path==='/verification-default');
+    assert.equal(header.language,'en-US,en;q=0.9');
+    assert.equal(await rtc(verification),'NotAllowedError');
+    const geo=await location(verification);assert.notDeepEqual(geo,{lat:31.23,lon:121.47});
+    const widths=await fontWidths(verification);assert.equal(widths.custom,widths.generic);
+    assert.deepEqual(await workerProfile(verification),baselineWorker);
+    assert.equal(await verification.evaluate(()=>('GeoMirrorTZ' in window)||('NotmeIdentity' in window)),false);
+  }
+  pass('两个指定检测站直接使用保存的默认环境，时区、语言、位置、字体、WebRTC 与请求头生效');
+
+  const verificationDefaults=Object.fromEntries(['enabled','tzEnabled','langEnabled','identityEnabled','fontEnabled','workerEnabled','webrtcProtect'].map(key=>[key,true]));
+  await send({type:'SET_SETTINGS',patch:{guardDefaults:{...verificationDefaults,langEnabled:false}}});
+  await wait(async()=>await verification.evaluate(()=>navigator.language===navigator.languages[0]&&navigator.language==='zh-CN'));
+  assert.equal(await verification.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone),'America/Los_Angeles');
+  await workerProfile(verification);
+  await wait(async()=>(await workerProfile(verification)).zone==='America/Los_Angeles');
+  await verification.goto('https://fuck-claude.app/verification-mixed');
+  await wait(async()=>await verification.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone==='America/Los_Angeles'));
+  assert.equal(traffic.findLast(item=>item.host==='fuck-claude.app'&&item.path==='/verification-mixed').language.startsWith(original.language),true);
+  assert.equal(await verification.evaluate(()=>navigator.language),original.language);
+  pass('检测站遵循独立默认开关，语言可恢复原生而时区及 Worker 继续伪装，已打开页面同步更新');
+
+  await send({type:'SET_SETTINGS',patch:{guardDefaults:Object.fromEntries(Object.keys(verificationDefaults).map(key=>[key,false]))}});
+  await wait(async()=>await verification.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone==='Asia/Shanghai'));
+  for(const host of Network.VERIFICATION_DOMAINS) await verifyOrdinary(verification,`https://${host}/verification-native`);
+  pass('默认选择全部系统默认时，两个检测站的 API、GPS、字体、Worker、WebRTC 和请求头恢复原生');
+  await send({type:'SET_SETTINGS',patch:{guardDefaults:null}});
+  await verification.close();
+  const denied=await send({type:'NOTME_VERIFICATION_PROFILE'});
+  assert.match(denied.error,/消息来源无效/);
+  pass('检测站配置接口拒绝非检测站页面调用');
 
   traffic.length = 0;
   await page.reload();
