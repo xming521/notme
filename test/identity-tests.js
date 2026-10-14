@@ -97,7 +97,7 @@ async function main() {
     assert.throws(() => vm.runInContext("Object.getOwnPropertyDescriptor(Object.getPrototypeOf(navigator), 'userAgent').get.call({})", ctx));
     assert.equal(vm.runInContext('Function.prototype.toString.call(navigator.userAgentData.getHighEntropyValues)', ctx), 'function getHighEntropyValues() { [native code] }');
   });
-  await test('global toggle restores native identity on unrelated pages and protected sites stay masked', async () => {
+  await test('unrelated sites follow global toggles; guarded sites follow entry choices; verification sites stay masked', async () => {
     for (const host of ['outside.test', 'fakefuck-claude.vercel.app', 'fuck-claude.vercel.app.outside.test']) {
       const ctx = page(host, 'Chrome/140.0.0.0 QQBrowser/20', 'Win32', 'HUAWEI P60');
       assert(snapshot(ctx).ua.includes('QQBrowser'));
@@ -108,17 +108,23 @@ async function main() {
       assert(snapshot(ctx).ua.includes('QQBrowser'));
       assert.equal((await vm.runInContext("navigator.userAgentData.getHighEntropyValues(['model'])", ctx)).model, 'HUAWEI P60');
     }
-    for (const host of ['claude.ai', 'api.anthropic.com', 'claude.com', 'fuck-claude.app', 'www.fuck-claude.vercel.app']) {
+    for (const host of ['fuck-claude.app', 'www.fuck-claude.vercel.app']) {
       const ctx = page(host, 'Chrome/140.0.0.0 QQBrowser/20', 'Win32', 'HUAWEI P60');
       vm.runInContext('publish({identityEnabled: false})', ctx);
       assert(!snapshot(ctx).ua.includes('QQBrowser'), host);
     }
-    assert(!snapshot(page('', 'Chrome/140.0.0.0 QQBrowser/20', 'Win32', 'HUAWEI P60', 'https://claude.ai')).ua.includes('QQBrowser'));
+    for (const host of ['claude.ai', 'api.anthropic.com', 'claude.com', 'brandnew.claude.site', '']) {
+      const ctx = page(host, 'Chrome/140.0.0.0 QQBrowser/20', 'Win32', 'HUAWEI P60', 'https://claude.ai');
+      vm.runInContext('publish({guardSelection:true,identityEnabled:false})', ctx);
+      assert(snapshot(ctx).ua.includes('QQBrowser'));
+      vm.runInContext('publish({guardSelection:true,identityEnabled:true})', ctx);
+      assert(!snapshot(ctx).ua.includes('QQBrowser'));
+    }
   });
   await test('bridge profile keeps JS and outgoing headers on the same identity', async () => {
     const p = Identity.buildProfile('Chrome/141.0.0.0 Edg/141.0.0.0', 'Win32');
     const ctx = page('claude.ai', 'Chrome/140.0.0.0 QQBrowser/20', 'Win32', 'HUAWEI P60');
-    ctx.payload = { identityEnabled: false, identityProfile: p };
+    ctx.payload = { guardSelection: true, identityEnabled: true, identityProfile: p };
     vm.runInContext('publish(payload)', ctx);
     assert.equal(snapshot(ctx).ua, p.userAgent);
     const high = plain(await vm.runInContext("navigator.userAgentData.getHighEntropyValues(['model','fullVersionList','uaFullVersion'])", ctx));
@@ -138,6 +144,9 @@ async function main() {
         runtime: { onInstalled: listener, onStartup: listener, onMessage: listener }, alarms: { onAlarm: listener },
       },
     });
+    ctx.self = ctx;
+    vm.runInContext(read('lib/network.js'), ctx);
+    vm.runInContext(read('lib/environment.js'), ctx);
     vm.runInContext(read('lib/identity.js'), ctx); vm.runInContext(read('background.js'), ctx);
     await vm.runInContext('syncHeaderRule({identityEnabled:false,langEnabled:false}, null)', ctx);
     assert.equal(calls[0].addRules.length, 2);

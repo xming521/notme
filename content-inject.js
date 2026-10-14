@@ -45,12 +45,13 @@
   const MARK = '__nmb__'; // neutral window.postMessage marker (CustomEvent detail
                           // does not cross the isolated→MAIN world boundary)
 
-  // Anthropic properties and the verification sites get the same timezone,
-  // locale, font, and identity protection regardless of the corresponding toggles.
+  // Guarded sites use the per-visit selection; verification sites keep their forced protection.
   let ON_ANTHROPIC = false;
+  let ON_GUARDED = false;
   try {
     const host = location.hostname || new URL(window.origin).hostname;
-    ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|fuck-claude\.app|fuck-claude\.vercel\.app)$/i.test(host);
+    ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|claude\.app|claudeusercontent\.com|claudemcpcontent\.com|claude\.site|fuck-claude\.app|fuck-claude\.vercel\.app)\.?$/i.test(host);
+    ON_GUARDED = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|claude\.app|claudeusercontent\.com|claudemcpcontent\.com|claude\.site)\.?$/i.test(host);
   } catch (_) {}
 
   // ---------------------------------------------------------------------------
@@ -95,17 +96,31 @@
   // Override state (published by the isolated bridge).
   // ---------------------------------------------------------------------------
   let cache = null;
+  // The gate delivers the checked profile in a fragment (never sent to the server).
+  // Read it synchronously so the first inline site script cannot observe native defaults.
+  if (ON_ANTHROPIC && location.hash?.startsWith('#__notme_entry=')) {
+    try {
+      const raw = atob(location.hash.slice('#__notme_entry='.length));
+      const entry = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, character => character.charCodeAt(0))));
+      cache = { ...entry.profile, identityProfile: entry.identity };
+      history.replaceState(history.state, '', location.pathname + location.search + (entry.hash || ''));
+    } catch (_) {}
+  }
+  if (cache?.guardSelection && !cache.enabled && !cache.tzEnabled && !cache.langEnabled
+    && !cache.identityEnabled && !cache.fontEnabled) return;
   let readyResolve;
   const ready = new Promise((r) => { readyResolve = r; });
+  if (cache) readyResolve();
 
   // The three surfaces are independent toggles (Location / Timezone / Language),
   // matching the popup — timezone and language don't depend on the geolocation
   // ("Location spoof") switch.
-  function tzActive() { return !!(cache && cache.timezone && TZ && (cache.tzEnabled || ON_ANTHROPIC)); }
-  function langActive() { return !!(cache && cache.locale && (cache.langEnabled || ON_ANTHROPIC)); }
-  // Font hiding is IP-independent, so it defaults on before override data arrives.
-  function fontActive() { return ON_ANTHROPIC || !cache || cache.fontEnabled !== false; }
-  function identityActive() { return !!(Identity && (ON_ANTHROPIC || (cache && cache.identityEnabled === true))); }
+  const forced = ON_ANTHROPIC && !ON_GUARDED;
+  function tzActive() { return !!(cache && cache.timezone && TZ && (cache.tzEnabled || forced)); }
+  function langActive() { return !!(cache && cache.locale && (cache.langEnabled || forced)); }
+  // Guarded frames start native until their per-visit profile arrives.
+  function fontActive() { return forced || (!cache ? !ON_GUARDED : cache.fontEnabled !== false); }
+  function identityActive() { return !!(Identity && (forced || (cache && cache.identityEnabled === true))); }
   function identityProfile() { return (cache && cache.identityProfile) || nativeIdentity; }
   function workerActive() { return !!(cache && cache.workerEnabled !== false && (tzActive() || langActive())); }
 

@@ -220,13 +220,14 @@ test('background applies Accept-Language to all resource types and blocks WebRTC
   assert(/webrtcProtect:\s*true/.test(src), 'webrtcProtect should default on');
 });
 
-test('Anthropic domains get always-on protection', () => {
+test('Anthropic domains have navigation profile handling', () => {
   const fs = require('fs');
   const bg = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
-  assert(/anthropic\.com/.test(bg) && /claude\.ai/.test(bg) && /claude\.com/.test(bg), 'Anthropic domains must be listed');
+  const roots = require('../lib/network.js').ROOT_DOMAINS;
+  assert(['anthropic.com', 'claude.ai', 'claude.com'].every(domain => roots.includes(domain)), 'Anthropic domains must be listed');
   assert(bg.includes('AL_ANTHROPIC_RULE_ID') && bg.includes('requestDomains'), 'always-on Anthropic Accept-Language rule required');
   const inj = fs.readFileSync(path.join(__dirname, '..', 'content-inject.js'), 'utf8');
-  assert(/ON_ANTHROPIC/.test(inj), 'injector must force protection on Anthropic domains');
+  assert(/ON_ANTHROPIC/.test(inj), 'injector must recognize Anthropic domains');
   assert(/delete window\.GeoMirrorTZ/.test(inj), 'the shared global must be deleted after capture');
 });
 

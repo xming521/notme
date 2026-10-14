@@ -69,6 +69,7 @@ function render({ state, override, settings }) {
     $('refreshMinutes').value = settings.refreshMinutes;
     $('ipToken').value = settings.ipToken || '';
     $('manualTz').value = settings.manualTz || '';
+    $('networkWarnMs').value = settings.networkWarnMs || 500;
   }
 }
 
@@ -114,6 +115,7 @@ bind('workerEnabled', 'workerEnabled');
 bind('accuracyM', 'accuracyM', (v) => Math.max(5, Math.min(500, +v || 30)));
 bind('refreshMinutes', 'refreshMinutes', (v) => Math.max(30, Math.min(10080, +v || 360)));
 bind('ipToken', 'ipToken', (v) => (v || '').trim());
+bind('networkWarnMs', 'networkWarnMs', v => Math.max(1, Math.min(60000, +v || 500)));
 
 // Manual timezone: save, then re-detect so it applies immediately (IP detection
 // still wins when it succeeds; the manual value is the fallback).

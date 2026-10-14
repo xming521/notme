@@ -5,10 +5,9 @@ what data the extension touches, where it goes, and where it does **not** go.
 
 ## The short version
 
-notme makes **no requests to any server it does not need**, sends **no
-telemetry**, collects **no analytics**, and shares data with **no third party
-other than the four geolocation services listed below** — which it contacts only
-to do its job, and only with the minimum information required.
+notme sends no telemetry or analytics. Its background requests are limited to
+the destination's network diagnostic endpoint and the geolocation/map services
+listed below, using the data needed for those checks.
 
 ## What the extension does
 
@@ -26,10 +25,15 @@ to do its job, and only with the minimum information required.
 5. Page scripts also apply the configured timezone, locale, and font protections.
    Browser/device masking presents ordinary Chrome/Chromium brands and an empty
    device model, using a generic profile for the reported Chromium version and
-   OS family. It is always active on Anthropic and the two verification sites;
-   on other sites it is optional and off by default.
+   OS family. Anthropic pages use the per-visit choices; the two verification
+   sites retain always-on masking. On other sites it is optional and off by default.
 6. Declarative rules modify language and identity headers on existing website
    requests. Browser/device masking adds no network endpoints or telemetry.
+7. Before an Anthropic navigation, the local check page requests the target
+   host's `/cdn-cgi/trace` three times without cookies, credentials or a referrer.
+   Confirmation repeats this probe. The target's reported exit IP is used for an
+   explicit IP geolocation lookup; this handles proxies that route destinations
+   through different exits.
 
 ## Network requests (the complete list)
 
@@ -39,21 +43,31 @@ to do its job, and only with the minimum information required.
 | `ipwho.is` | Fallback IP geolocation | GET only |
 | `ipapi.co` | Fallback IP geolocation | GET only |
 | `ipinfo.io` | Fallback IP geolocation; optional token if you provide one | GET; your token if entered |
+| Requested host under `anthropic.com`, `claude.ai`, `claude.com`, `claude.app`, `claudeusercontent.com`, `claudemcpcontent.com`, `claude.site` | HTTPS connectivity and destination-exit check | GET `/cdn-cgi/trace`; no cookies or credentials |
 | `overpass-api.de`, `overpass.kumi.systems`, `maps.mail.ru/osm/tools/overpass` | Find nearby residential roads (OpenStreetMap) | The exit-IP latitude/longitude |
 | `api.bigdatacloud.net` | Reverse-geocode the chosen point for display | The chosen override latitude/longitude |
 
-These are the **only** outbound connections the extension ever makes. They are
-declared in `manifest.json` under `host_permissions`, so you can verify them
-yourself and Chrome will warn you before granting them.
+These are the background endpoints used by the extension. Explicit destination-IP
+lookups send that observed IP to `ipwho.is`, `ipapi.co`, or `ipinfo.io`; these
+services may see a different source IP under split routing. Host access is
+declared as `<all_urls>` for the content scripts and request rules.
 
 ## What is stored, and where
 
 - The detected IP, the chosen override coordinate, and your settings are stored
-  **locally** in Chrome's extension storage (`chrome.storage.local`). They never
-  leave your machine.
+  locally in Chrome's extension storage (`chrome.storage.local`). Geolocation
+  and map queries transmit the IP or coordinates described above.
 - A generic browser/device profile is stored locally to keep page API values and
   outgoing identity headers consistent. The original device model is not stored.
 - Nothing is written to disk outside Chrome's own storage.
+- The pending target URL, check results and each tab's checked profile are held
+  in `chrome.storage.session` for the browser session. They are removed when the
+  tab closes or leaves the protected site; they are not uploaded as history.
+  Per-visit spoof/default flags are stored with that profile. The latest confirmed
+  WebRTC choice is stored in session storage because Chrome applies it browser-wide.
+- The checked profile is temporarily carried in a URL fragment on admission.
+  Fragments are not sent in HTTP requests; the MAIN-world injector consumes it
+  at document start and restores the original fragment.
 
 ## What the extension does NOT do
 
@@ -74,6 +88,12 @@ abuse, so you are right to scrutinize it. The source code is short and fully
 auditable; `content-inject.js` patches browser APIs, and the content scripts
 do not read page content. Host access also lets the declarative header rules
 apply to the selected destinations.
+
+`tabs` and `webNavigation` associate the pending URL and admission rules with
+the correct tab and navigation. The guard does not inspect page contents.
+`browsingData` removes Service Workers and CacheStorage only for the protected
+target origin on navigation. It does not delete cookies, localStorage, IndexedDB,
+saved passwords or unrelated website data.
 
 If you are privacy-conscious, you can run it unpacked from source so you can
 read and rebuild it yourself at any time.

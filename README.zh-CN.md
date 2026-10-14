@@ -8,6 +8,18 @@ notme 是一个 Chrome Manifest V3 扩展，适合使用代理、VPN、远程桌
 
 ---
 
+## Anthropic 访问前检查
+
+每次打开或刷新 Anthropic 网址，先进入本地环境选择页。可以选择 **使用 notme 伪装**、**全部使用系统默认**，也可以逐项自定义。静态规则提前拦截正式 HTML 和子资源；检查全部通过后，还需要你点击 **确认并访问**。以前访问过、其他标签页已放行，都不能代替这次确认。
+
+覆盖 `anthropic.com`、`claude.ai`、`claude.com`、`claude.app`、`claudeusercontent.com`、`claudemcpcontent.com`、`claude.site` 及它们的所有子域。两个浏览器指纹检测站保留原来的画像防护，不增加访问检查页。
+
+每次检查向实际目标域名的 `/cdn-cgi/trace` 发起三次不带 Cookie 的 HTTPS 请求，核实连通性、延迟、出口是否稳定，并沿用 `verify-networking` 的地区限制（`CN`、`HK`、`KP`、`CU`、`IR`、`SY`、`RU`、`BY`）。地理位置查询使用该目标实际返回的出口 IP，避免代理分流时误用通用查 IP 服务的出口。网络结果未知或有警告时，不能确认进入。只对所选的伪装项准备环境数据；选择系统默认时，不会强制把原生时区改成出口时区。点击确认时再次检查网络；出口或相关设置改变会使原来的检查失效。检查超过一分钟需要重做。
+
+伪装沿用 notme 原有的自动检测或手动时区流程。地理位置、时区、语言及请求头、浏览器与设备标识、字体、Web Worker、WebRTC 都能独立选择伪装或系统默认。手动时区即使与出口地区不同，也按原有流程保留。确认后，该标签页按本次选择生效；语言或浏览器标识选择默认时，请求头也保留原生值。第一个内联脚本就能读取所选环境。不同地区的标签页互不覆盖。已确认标签页可以加载上述保护域名的子资源，子资源各自的出口没有逐一检查。
+
+**普通扩展的边界：** 站点已有的 Service Worker / CacheStorage 响应和前进、后退时的页面缓存恢复，可能绕过 Chrome 的声明式网络规则。因此，在普通浏览器里加载扩展，无法保证此前缓存的页面内容绝不会在确认前出现。该问题已在 Chromium 实测复现，参见 [Chrome 官方说明](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest#interactions_with_service_workers)。每次保护域名导航时，会清理该目标 origin 的 Service Worker 与 CacheStorage，保留 Cookie、localStorage 和 IndexedDB；未确认的缓存页面提交会被送回选择页。这能减少缓存绕过，但不能保证竞争时序和历史恢复中绝无内容短暂显示。
+
 ## Motivation：只换 IP 远远不够
 
 最近 Claude / Anthropic 的封号风波让很多人意识到一个现实问题：平台的风控如果机械地依赖地址、地区、登录环境等信号，就可能非常粗暴。很多用户反馈过，只是换了 IP、旅行、使用 VPN、或者浏览器环境和 IP 地区不一致，就可能触发账号限制甚至封禁。
@@ -80,14 +92,16 @@ flowchart LR
 | **整个 `Date` 本地时间面** | 只有 `getTimezoneOffset` 被改，`getHours`/`toString`/`toLocaleString` 等仍暴露本机时区 | `getTimezoneOffset` **以及** 所有本地 getter/setter、`toString`/`toDateString`/`toTimeString`、`toLocale*`、数字构造函数、无偏移量字符串解析、`Date()` 函数调用，全部按出口 IP 时区（含 DST）计算 |
 | Intl 时区 | 本机系统时区 | 出口 IP 对应时区（即使传入 locale 也注入） |
 | navigator 语言 | 本机语言 | 根据国家码 + 时区推断 |
-| 浏览器 / 设备品牌 | UA、UA-CH 中的国产浏览器标识和设备型号 | 显示普通 Chrome/Chromium 品牌，隐藏设备型号，并同步 `User-Agent` 与相关 Client Hints 请求头；Claude 和两个检测站始终启用，其他网站可选 |
+| 浏览器 / 设备品牌 | UA、UA-CH 中的国产浏览器标识和设备型号 | 显示普通 Chrome/Chromium 品牌，隐藏设备型号，并同步 `User-Agent` 与相关 Client Hints 请求头；Claude 按本次选择，两个检测站始终启用，其他网站可选 |
 | Intl 默认 locale | 本机 locale | `DateTimeFormat`/`NumberFormat`/`Collator`/`RelativeTimeFormat`/`PluralRules`/`ListFormat`/`DisplayNames`/`Segmenter`/`DurationFormat` + `Number`/`Array`/`BigInt.toLocaleString` 全部一致 |
 | Accept-Language | 本机请求头语言，且仅主/子框架和 XHR 生效 | 与推断语言一致，覆盖**所有**资源类型（图片/字体/脚本/beacon 等） |
 | WebRTC IP | 可能绕过代理泄露真实 IP | 可选强制走代理（`disable_non_proxied_udp`），ICE candidate 不再泄露真实 IP |
 | 反检测 | `Function.prototype.toString` 可拆穿伪装，`data-notme` 属性残留在 DOM | 伪装函数对 `fn.toString()` 与 `Function.prototype.toString.call(fn)` 都显示 native；payload 改用 `window.postMessage` 传递，不写入 DOM；捕获后立即删除 `window.GeoMirrorTZ` 全局,页面无从探测 |
-| **Anthropic 页面** | —— | 在 `anthropic.com` / `claude.ai` / `claude.com`（含子域）上，时区、locale、字体和浏览器/设备防护**无视开关强制生效**；时区、语言需要有效数据，浏览器/设备防护立即生效 |
+| **Anthropic 页面** | —— | 七个保护主域及所有子域先选择环境、检查网络，再确认访问；各项可单独选择伪装或系统默认 |
 
 本 fork 还将相同的强制防护应用到 [`fuck-claude.app`](https://fuck-claude.app/zh/) 和 [`fuck-claude.vercel.app`](https://fuck-claude.vercel.app/zh/)，包含两者的子域名。更新后先重新加载扩展，再刷新检测页面。浏览器/设备伪装保留原 UA 中的 Chromium 版本和系统大类，使用通用设备信息，无需等待 IP 定位。其他网站默认关闭，可用 **Mask browser & device on other sites** 开关启用。时区和语言伪装需要有效的检测或配置数据。Web Worker 时区/语言伪装仍为可选功能，默认关闭；Worker 内的 JavaScript 浏览器/设备信息尚未覆盖。
+
+WebRTC 是浏览器全局设置，最后一次确认会影响其他标签页；选择默认会释放 notme 对该策略的控制。其他环境项按确认后的标签页独立生效。
 
 ## 它具体做了什么
 
@@ -120,6 +134,7 @@ notme 是 local-first、可审计的：
 - 检测出口 IP 的位置；
 - 查询出口 IP 附近住宅道路；
 - 为弹窗显示做反地理编码。
+- 检查目标 Anthropic 域名的 `/cdn-cgi/trace`，并查询该目标返回的出口 IP 的位置。
 
 它不会上传页面内容或浏览历史。完整数据流见 [隐私政策](./PRIVACY.md) 和 [技术说明](./docs/TECHNICAL.md)。
 
@@ -202,7 +217,7 @@ navigator.geolocation.getCurrentPosition(console.log, console.error)
 - **Location spoof**：启用/关闭地理位置伪装。
 - **Timezone spoof**：启用/关闭 `Date` 和 `Intl` 时区伪装。
 - **Language spoof**：启用/关闭 `navigator.language(s)`、Intl locale、`Accept-Language`。
-- **Mask browser & device on other sites**：在其他网站也隐藏浏览器/设备品牌，默认关闭。Claude 和两个检测站始终启用；UA、UA-CH、设备型号和身份请求头保持一致。
+- **Mask browser & device on other sites**：在其他网站也隐藏浏览器/设备品牌，默认关闭。两个检测站始终启用；Claude 按访问选择页的开关生效。UA、UA-CH、设备型号和身份请求头保持一致。
 - **Block WebRTC IP leak**：强制 WebRTC 走代理，让 ICE candidate 无法暴露真实 IP。默认开启。如果你在没有 UDP 中继的代理上使用视频通话等 WebRTC 功能，可关闭它 —— 开启时这类通话可能连不上，但不会泄露真实 IP。
 - **Hide CJK fonts**：把暴露操作系统/地区的中文字体(微软雅黑、苹方、宋体、黑体…简繁都含)从 canvas `measureText` 和 DOM 宽度探测里剥掉，让它们读起来像"未安装"。默认开启。
 - **Spoof in Web Workers（实验性）**：把时区/语言伪装扩展到专用 Web Worker(指纹站常在 worker 里读真实时区来绕过主线程伪装)。**默认关闭** —— 它通过 blob 垫片重新加载 worker 代码,可能破坏依赖 `self.location` 的 WASM/打包 worker。它会探测 CSP 是否允许 `blob:`,被拦时回退到原生 worker(不会静默弄坏 worker),但请仅在你确实需要 worker 级时区隐藏时开启;某站点 worker 出问题就关掉它。

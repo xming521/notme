@@ -28,6 +28,62 @@ The extension currently spoofs:
 
 ## Runtime flow
 
+### Anthropic navigation admission
+
+`guard-rules.json` redirects protected main-frame requests to `gate.html` and
+blocks protected subresources from extension startup. `lib/network.js` shares
+the seven root domains across the worker and profile code. HTTPS trace probes
+are the only protected requests allowed from the extension before approval.
+Browser APIs do not provide a raw TCP handshake or independent DNS result; the
+preflight measures the browser's HTTPS path to the requested hostname.
+
+`lib/guard.js` keeps the pending target and profile per tab in session storage.
+Every main-frame navigation creates a fresh check. The gate requires all checks
+to pass, then a separate click; warnings and unknown results cannot be bypassed.
+Confirmation repeats the three probes, requires the same exit IP and country,
+and rejects changed admission settings or selections. A check is
+valid for at most 60 seconds.
+
+Confirmation installs a temporary main-frame allow rule limited to that tab,
+host and extension initiator. `onCommitted` removes it. The tab retains a
+subresource allow rule and, when needed, a profile header rule until its next navigation.
+Main-frame rules and header rules explicitly enumerate resource types: Chrome
+excludes main frames when the types are omitted. Header modification priorities
+for the per-tab profile are above the allow rules. Those allow rules are above
+the generic profile headers, suppressing generic overrides so default selections
+keep native headers, including requests to third-party resources.
+
+The gate offers the existing notme preset, an all-native preset, and seven
+independent switches. `lib/environment.js` normalizes those choices; only chosen
+location/timezone/language surfaces need geographic profile data. Forced timezones
+use `buildManualOverride`, as ordinary notme does. A selection signature rejects
+outdated checks when the user changes controls during a probe. WebRTC uses
+Chrome's browser-wide privacy setting, applied on confirmation; the latest
+confirmed setting persists for the browser session unless changed in the popup.
+
+For the first protected document, the gate carries the checked profile in a URL
+fragment. `content-inject.js` consumes it synchronously at `document_start` and
+restores the original fragment before the page's first inline script. The bridge
+then requests that tab's profile instead of replacing it with a generic exit
+profile. This keeps tabs with different proxy exits independent.
+
+The injector honors the per-visit flags instead of forcing Anthropic surfaces
+on. With all page surfaces native, it returns before installing wrappers.
+Protected frames without a delivered profile start with native reads until the
+bridge arrives; spoofing is synchronous for the admitted top-level document.
+
+The ordinary-extension gate governs network-stack requests, including HTTP
+cache, but not existing Service Worker / CacheStorage responses or back-forward
+cache restores. Chrome documents the Service Worker boundary in its
+[DNR reference](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest#interactions_with_service_workers).
+An ordinary extension cannot promise zero cached page content before approval.
+On each new protected navigation, `browsingData.remove` removes only Service
+Workers and CacheStorage for the exact target origin. Cookies, localStorage,
+IndexedDB and unrelated origins are preserved. An unapproved protected commit
+returns to the gate, but this cannot undo content already rendered from cache.
+
+### General profile refresh
+
 1. `background.js` detects the visible exit IP location using multiple IP providers.
 2. `lib/providers.js` normalizes provider responses and preserves IANA timezone IDs when providers return them.
 3. `lib/geo.js` chooses a nearby residential-looking coordinate using Overpass/OpenStreetMap, with fallback logic when Overpass is unavailable.
@@ -94,9 +150,10 @@ The injector patches `navigator.userAgent`, `appVersion`, `platform`, and
 profile. Native hint validation and permission checks run first. Unrelated
 high-entropy fields, such as architecture and platform version, are retained.
 
-Identity masking is forced on for Anthropic and both verification domains,
-including subdomains and inherited-origin blank frames. It defaults off on
-other sites; `identityEnabled` enables it globally. Changing that setting restores
+Identity masking follows the per-visit choice for Anthropic and remains forced
+on for both verification domains, including their subdomains and inherited-origin
+blank frames. It defaults off on other sites; `identityEnabled` enables it globally.
+Changing that setting restores
 native reads on ordinary pages without replacing `navigator.userAgentData`.
 
 DNR rules synchronize `User-Agent`, `Sec-CH-UA`, `Sec-CH-UA-Mobile`,
@@ -163,26 +220,24 @@ the font is not installed. This hides the OS/region signal (a Windows/macOS
 Chinese font set contradicting, say, a Los Angeles exit IP). The DOM path only
 acts on elements that declare a CJK font inline, so normal layout is untouched.
 
-## Always-on protection for Anthropic
+## Protected-site profile selection
 
-Because the motivating concern is Anthropic reading the real OS timezone, the
-timezone / locale / font / browser-device protections are forced on for Anthropic properties
-regardless of the popup toggles:
+The default notme preset selects the previous Anthropic protections. The per-visit
+switches can restore any surface to the browser default:
 
 - **Content script.** `content-inject.js` sets `ON_ANTHROPIC` when
-  `location.hostname` matches `anthropic.com`, `claude.ai`, or `claude.com`
-  (or a subdomain). `tzActive()` / `langActive()` / `fontActive()` then treat
-  the feature as enabled even if the corresponding toggle is off (timezone and
-  locale still require override data to have a value to spoof to).
+  `location.hostname` matches one of the seven protected roots or a subdomain.
+  `tzActive()` / `langActive()` / `fontActive()` use that tab's selected flags.
 - **Header.** `background.js` installs a second, higher-priority
   `declarativeNetRequest` rule (`requestDomains` = those domains) that always
   sets the spoofed `Accept-Language` on requests to Anthropic, independent of the
-  language toggle.
+  language toggle. An admitted tab's higher-priority rules suppress this generic
+  rule and set only headers explicitly selected for spoofing.
 
 This fork includes `fuck-claude.app` and `fuck-claude.vercel.app`, including their
 subdomains, in both the content-script hostname check and the header rule's
-`requestDomains`, so both verification sites receive the same always-on behavior
-as Anthropic. Unrelated sites continue to follow the global toggles.
+`requestDomains`, so both verification sites retain their always-on behavior.
+They do not use the navigation gate. Unrelated sites follow the global toggles.
 
 The experimental Web Worker feature is *not* force-enabled on Anthropic
 (claude.ai is worker-heavy and the blob rewrite could break it); the main-thread
@@ -207,8 +262,10 @@ extension by a well-known global or attribute.
 Run:
 
 ```bash
-node test/run-tests.js
-node test/identity-tests.js
+npm install --ignore-scripts
+npm test
+# Requires Chromium (or CHROMIUM_PATH), OpenSSL and fontconfig:
+npm run test:browser
 node --check background.js
 node --check content-inject.js
 node --check content-bridge.js

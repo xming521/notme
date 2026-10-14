@@ -64,6 +64,11 @@
   </section>
 
   <section class="card">
+    <div class="row"><span>Anthropic environment</span><b>Choose each visit, then confirm</b></div>
+    <div class="row"><label for="networkWarnMs">Network warning (ms)</label><input type="number" id="networkWarnMs" min="1" max="60000" /></div>
+  </section>
+
+  <section class="card">
     <div class="row"><label for="manualTz">Force timezone</label><select id="manualTz"></select></div>
     <div class="row"><label for="accuracyM">Accuracy (m)</label><input type="number" id="accuracyM" min="5" max="500" /></div>
     <div class="row"><label for="refreshMinutes">Refresh (min)</label><input type="number" id="refreshMinutes" min="30" max="10080" /></div>
@@ -71,7 +76,7 @@
   </section>
 
   <footer>
-    <a href="https://github.com/deafenken/notme" target="_blank" rel="noopener">notme</a>
+    <a href="https://github.com/xming521/notme" target="_blank" rel="noopener">notme</a>
   </footer>
 
   <script src="lib/tzdata.js"></script>

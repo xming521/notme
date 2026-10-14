@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>notme · 访问前检查</title><link rel="stylesheet" href="gate.css"></head>
+<body><main>
+  <header><img src="icons/icon48.png" alt=""><b>notme</b><button id="settings" class="secondary">设置</button></header>
+  <p class="eyebrow">Anthropic / Claude 访问前检查</p><h1>选择这次访问的环境。</h1>
+  <p id="summary" role="status">正式网页请求已拦截，请选择环境。</p><p id="target" class="target"></p>
+  <div class="presets"><button id="preset-spoof" class="secondary" disabled>使用 notme 伪装</button><button id="preset-native" class="secondary" disabled>全部使用系统默认</button><span id="mode"></span></div>
+  <section id="choices" aria-label="本次访问的环境选择"></section>
+  <h2>网络与环境检查</h2>
+  <section id="checks" aria-live="polite"></section><p id="error" role="alert"></p>
+  <div class="actions"><button id="confirm" disabled>确认并访问</button><button id="retry" class="secondary">重新检查</button><button id="close" class="secondary">关闭标签页</button></div>
+  <footer>开关仅用于本次访问；WebRTC 为浏览器全局设置。再次打开或刷新会重新选择并确认。</footer>
+</main><script src="lib/environment.js"></script><script src="gate.js"></script></body></html>

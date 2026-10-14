@@ -1,14 +1,17 @@
 {
   "manifest_version": 3,
   "name": "notme",
-  "version": "1.6.0",
-  "description": "Make your browser stop contradicting your exit IP: spoof geolocation, the whole Date/Intl timezone surface, navigator.language, the Accept-Language header, and hide OS/region-revealing CJK fonts. Always-on protection for Anthropic pages.",
+  "version": "1.7.0",
+  "description": "Choose native or spoofed browser signals before each Anthropic visit; align location, timezone, language and browser identity.",
   "minimum_chrome_version": "119",
   "permissions": [
     "storage",
     "alarms",
     "declarativeNetRequest",
-    "privacy"
+    "privacy",
+    "tabs",
+    "webNavigation",
+    "browsingData"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -16,6 +19,13 @@
   "background": {
     "service_worker": "background.js"
   },
+  "declarative_net_request": {
+    "rule_resources": [{ "id": "navigation_guard", "enabled": true, "path": "guard-rules.json" }]
+  },
+  "web_accessible_resources": [{ "resources": ["gate.html"], "matches": [
+    "*://*.anthropic.com/*", "*://*.claude.ai/*", "*://*.claude.com/*", "*://*.claude.app/*",
+    "*://*.claudeusercontent.com/*", "*://*.claudemcpcontent.com/*", "*://*.claude.site/*"
+  ] }],
   "content_scripts": [
     {
       "matches": [
@@ -58,5 +68,5 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "homepage_url": "https://github.com/deafenken/notme"
+  "homepage_url": "https://github.com/xming521/notme"
 }

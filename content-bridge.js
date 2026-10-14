@@ -37,7 +37,17 @@
         locale: o ? o.locale : null,
         languages: o ? o.languages : null,
       };
-      try { window.postMessage({ [MARK]: 'data', payload }, '*'); } catch (_) {}
+      let host = location.hostname || '';
+      if (!host) { try { host = new URL(window.origin).hostname; } catch (_) {} }
+      const guarded = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|claude\.app|claudeusercontent\.com|claudemcpcontent\.com|claude\.site)\.?$/i.test(host);
+      if (guarded) {
+        chrome.runtime.sendMessage({ type: 'NOTME_GUARD_PROFILE' }, response => {
+          if (response?.value) Object.assign(payload, response.value);
+          try { window.postMessage({ [MARK]: 'data', payload }, '*'); } catch (_) {}
+        });
+      } else {
+        try { window.postMessage({ [MARK]: 'data', payload }, '*'); } catch (_) {}
+      }
     });
   }
 

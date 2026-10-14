@@ -10,7 +10,7 @@
  *    *outgoing* HTTP header matches the spoofed language, not just navigator.
  *  - Refresh on install / startup and on demand (one-tap re-detect).
  */
-importScripts('lib/geo.js', 'lib/providers.js', 'lib/locale.js', 'lib/tzdata.js', 'lib/identity.js');
+importScripts('lib/geo.js', 'lib/providers.js', 'lib/locale.js', 'lib/tzdata.js', 'lib/identity.js', 'lib/network.js', 'lib/environment.js');
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
                           // workers that rely on self.location. Opt in if you need it.
   manualTz: '',           // fallback IANA timezone used when exit-IP detection fails
                           // (or a provider returns no timezone). Empty = auto only.
+  networkWarnMs: 500,
 };
 
 const ALARM = 'refresh';
@@ -38,7 +39,7 @@ const IDENTITY_INITIATOR_RULE_ID = 9005;
 const IDENTITY_PROFILE = NotmeIdentity.fromNavigator(typeof navigator !== 'undefined' ? navigator : {});
 // Anthropic properties and the verification sites get the spoofed Accept-Language
 // regardless of the language toggle (requestDomains also matches subdomains).
-const ANTHROPIC_DOMAINS = ['anthropic.com', 'claude.ai', 'claude.com', 'fuck-claude.app', 'fuck-claude.vercel.app'];
+const ANTHROPIC_DOMAINS = [...NotmeNetwork.ROOT_DOMAINS, 'fuck-claude.app', 'fuck-claude.vercel.app'];
 
 // Apply the Accept-Language override to every request type. Omitting resource
 // types (or listing only a subset) leaves images/scripts/fonts/beacons sending
@@ -77,17 +78,17 @@ async function syncHeaderRule(settings, override) {
         requestHeaders: [{ header: 'accept-language', operation: 'set', value: al }],
       };
       if (settings && settings.langEnabled) {
-        rules.push({ id: AL_RULE_ID, priority: 1, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
+        rules.push({ id: AL_RULE_ID, priority: 1000, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
       }
-      rules.push({ id: AL_ANTHROPIC_RULE_ID, priority: 2, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
+      rules.push({ id: AL_ANTHROPIC_RULE_ID, priority: 1001, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
     }
     const action = { type: 'modifyHeaders', requestHeaders: NotmeIdentity.requestHeaders(IDENTITY_PROFILE) };
     if (settings && settings.identityEnabled) {
-      rules.push({ id: IDENTITY_RULE_ID, priority: 1, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
+      rules.push({ id: IDENTITY_RULE_ID, priority: 1000, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
     }
-    rules.push({ id: IDENTITY_TARGET_RULE_ID, priority: 2, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
+    rules.push({ id: IDENTITY_TARGET_RULE_ID, priority: 1001, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
     // Cover third-party requests sent by protected pages as well as requests to them.
-    rules.push({ id: IDENTITY_INITIATOR_RULE_ID, priority: 2, action, condition: { initiatorDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
+    rules.push({ id: IDENTITY_INITIATOR_RULE_ID, priority: 1001, action, condition: { initiatorDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
     await chrome.declarativeNetRequest.updateDynamicRules({
       removeRuleIds: [AL_RULE_ID, AL_ANTHROPIC_RULE_ID, IDENTITY_RULE_ID, IDENTITY_TARGET_RULE_ID, IDENTITY_INITIATOR_RULE_ID],
       addRules: rules,
@@ -105,7 +106,8 @@ async function syncHeaderRule(settings, override) {
 async function syncWebRTC(settings) {
   try {
     if (!(chrome.privacy && chrome.privacy.network && chrome.privacy.network.webRTCIPHandlingPolicy)) return;
-    const on = !!(settings && settings.webrtcProtect);
+    const selected = await chrome.storage.session.get('guardWebRTCProtect');
+    const on = selected.guardWebRTCProtect ?? !!(settings && settings.webrtcProtect);
     if (on) {
       await chrome.privacy.network.webRTCIPHandlingPolicy.set({ value: 'disable_non_proxied_udp' });
     } else {
@@ -247,12 +249,17 @@ chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === ALARM) refresh();
 });
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (NotmeGuard.handles(msg)) {
+    NotmeGuard.message(msg, sender).then(value => sendResponse({ value }), error => sendResponse({ error: error.message }));
+    return true;
+  }
   (async () => {
     if (msg && msg.type === 'REFRESH') {
       await refresh();
     } else if (msg && msg.type === 'SET_SETTINGS') {
       const next = await saveSettings(msg.patch || {});
+      if (msg.patch && 'webrtcProtect' in msg.patch) await chrome.storage.session.remove('guardWebRTCProtect');
       const { override } = await chrome.storage.local.get('override');
       if (override) {
         override.enabled = next.enabled;
@@ -273,3 +280,52 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   })();
   return true; // keep channel open for async sendResponse
 });
+
+self.notmeGuardSettings = getSettings;
+self.notmeGuardIdentity = () => IDENTITY_PROFILE;
+self.notmeGuardWebRTC = async (protect) => {
+  await chrome.storage.session.set({ guardWebRTCProtect: protect });
+  await syncWebRTC(await getSettings());
+  const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
+  if (protect ? policy.value !== 'disable_non_proxied_udp' : policy.levelOfControl === 'controlled_by_this_extension') {
+    throw new Error('无法应用所选 WebRTC 设置，请检查浏览器或其他扩展的控制');
+  }
+};
+self.notmePrepareEnvironment = async (network, settings, selection) => {
+  let location = null;
+  let profile = {};
+  if (NotmeEnvironment.needsLocation(selection) && settings.manualTz) {
+    profile = buildManualOverride(settings, Date.now(), null).override;
+  } else if (NotmeEnvironment.needsLocation(selection) && network.trace && network.status !== 'fail') {
+    const stored = await chrome.storage.local.get(['state', 'override']);
+    if (stored.state?.status === 'ok' && stored.state.ip === network.trace.ip
+      && stored.state.ipCountryCode === network.trace.country && stored.state.ipTimezone) {
+      location = { ip: stored.state.ip, countryCode: stored.state.ipCountryCode, timezone: stored.state.ipTimezone,
+        city: stored.state.ipCity, lat: stored.state.ipLat, lon: stored.state.ipLon };
+    } else location = await IPLoc.getLocationForIP(network.trace.ip, settings.ipToken);
+    if (location) {
+      const locale = Locale.localeFor(location.countryCode, location.timezone);
+      const pick = stored.state?.status === 'ok' && stored.state.ip === network.trace.ip && stored.override?.lat != null
+        ? stored.override : selection.enabled
+          ? await GeoUtil.chooseResidential(location.lat, location.lon, { radius: 2500, limit: 150, timeoutMs: 12000 })
+          : { lat: location.lat, lon: location.lon };
+      profile = { lat: pick.lat, lon: pick.lon, timezone: location.timezone,
+        locale: locale?.language, languages: locale?.languages, acceptLanguage: locale?.acceptLanguage };
+    }
+  }
+  const checks = NotmeEnvironment.checks(network, location, settings, selection);
+  if (selection.langEnabled && !profile.locale) checks.push({ name: '伪装语言', status: 'fail', detail: '无法生成所选环境的语言' });
+  if (selection.enabled && profile.lat == null) checks.push({ name: '伪装位置', status: 'fail', detail: '未取得可用的位置坐标' });
+  if (selection.webrtcProtect) {
+    const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
+    const available = policy.value === 'disable_non_proxied_udp'
+      || !['not_controllable', 'controlled_by_other_extensions'].includes(policy.levelOfControl);
+    checks.push({ name: 'WebRTC 控制', status: available ? 'ok' : 'fail', detail: '确认时启用代理 UDP 保护（浏览器全局）' });
+  }
+  if (checks.some(check => check.status !== 'ok')) return { checks, override: null };
+  const override = {
+    ...profile, ...selection, guardSelection: true, acc: settings.accuracyM, ts: Date.now(), identityProfile: IDENTITY_PROFILE,
+  };
+  return { checks, override };
+};
+importScripts('lib/guard.js');

@@ -8,6 +8,18 @@ notme is a Chrome Manifest V3 extension for people who use proxies, VPNs, remote
 
 ---
 
+## Anthropic navigation checks
+
+Opening or reloading an Anthropic URL first redirects to a local environment selection page. Choose **Use notme spoofing**, **Use system defaults**, or set each surface independently. The static rules block the site's main HTML and subresources until the checks pass **and you click Confirm**. A previous visit or another tab does not authorize a new navigation.
+
+The protected roots are `anthropic.com`, `claude.ai`, `claude.com`, `claude.app`, `claudeusercontent.com`, `claudemcpcontent.com`, and `claude.site`, including all their subdomains. The two fingerprint verification sites keep their existing profile protection without this navigation gate.
+
+Each check makes three cookie-free HTTPS requests to the actual destination's `/cdn-cgi/trace`. It checks connectivity, latency, a stable exit IP, and the inherited `verify-networking` country restrictions (`CN`, `HK`, `KP`, `CU`, `IR`, `SY`, `RU`, `BY`). The observed destination IP is then used for geolocation; a generic IP lookup cannot stand in for the destination's exit when a proxy routes hosts differently. Unknown network results and warnings keep the Confirm button disabled. Only the selected spoofed surfaces require profile data; selecting system defaults does not force the browser to match the exit timezone. Confirmation repeats the network probe and rejects changed settings or a changed exit. Checks expire after one minute.
+
+Spoofing follows notme's existing automatic or forced-timezone workflow. The location, timezone, language/request headers, browser/device identity, fonts, Web Worker and WebRTC each have a spoof/default switch. A forced timezone is preserved even when it differs from the exit IP. After confirmation, the tab receives its own selected profile; language and identity headers stay native when their switches use system defaults. The first inline script receives the selected profile; a second tab with a different regional exit does not overwrite it. Resources under the protected roots are allowed in that approved tab; their individual exits are not separately checked.
+
+**Chrome extension boundary:** existing Service Worker / CacheStorage responses and back-forward cache restorations can bypass Chrome's declarative network rules. Therefore loading this extension in an ordinary browser does not guarantee that previously cached page content can never appear before confirmation. This boundary has been reproduced in Chromium; see [Chrome's DNR documentation](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest#interactions_with_service_workers). On each protected navigation, notme removes Service Workers and CacheStorage for that exact target origin, preserving cookies, localStorage and IndexedDB. An unapproved cached commit is redirected back to the gate. These measures reduce cached bypasses but cannot guarantee zero rendering during a race or history restoration.
+
 ## Motivation: IP alone is not enough
 
 Recent Claude / Anthropic account-ban controversies made one thing very clear: location-based risk controls can become brutal when they are applied mechanically. Many users reported that simply changing IPs, traveling, using VPNs, or having inconsistent regional signals could trigger account restrictions or bans. When a company such as Anthropic turns coarse address/location heuristics into account loss, the result is infuriating — but anger does not solve the operational problem.
@@ -42,7 +54,7 @@ notme detects your visible **exit IP**, derives a plausible browser profile from
 | Web Workers | Optionally (experimental, off by default) extends timezone + locale spoofing into dedicated Web Workers (where fingerprinters read the real timezone to bypass main-thread spoofing). |
 | CJK fonts | Optionally hides OS/region-revealing Chinese fonts (Microsoft YaHei, PingFang, SimSun, …, Simplified + Traditional) from canvas `measureText` and DOM width probes. |
 | Anti-detection | Spoofed functions report native to both `fn.toString()` and the intrinsic `Function.prototype.toString.call(fn)`; the override payload is not left in the DOM, and no global (like `window.GeoMirrorTZ`) is left for a page to probe. |
-| **Anthropic pages** | On `anthropic.com` / `claude.ai` / `claude.com` (and subdomains) timezone, locale, font, and browser/device protections are **forced on regardless of your toggles**. Timezone and locale require override data; browser/device masking works immediately. |
+| **Anthropic pages** | The seven protected roots and their subdomains receive environment selection, network checks and explicit confirmation. Each surface can use notme spoofing or the system default. |
 
 This fork also applies the same always-on protections to [`fuck-claude.app`](https://fuck-claude.app/zh/) and [`fuck-claude.vercel.app`](https://fuck-claude.vercel.app/zh/), including their subdomains. Reload the extension and test page after updating. Browser/device masking uses the reported Chromium version and a generic device profile for the same OS family, without waiting for IP detection. On other sites it is off by default; enable **Mask browser & device on other sites** to extend it globally. Timezone and language spoofing require valid detected or configured override data. Web Worker timezone/locale spoofing remains optional and off by default; worker JavaScript identity is not covered.
 
@@ -64,6 +76,7 @@ Important accuracy note: notme is not a zero-network extension. To match your cu
 - detecting the exit IP location,
 - finding nearby residential roads,
 - reverse-geocoding a display address for the popup.
+- checking the requested Anthropic host's `/cdn-cgi/trace` and locating its observed exit IP.
 
 It does not upload page content or browsing history. See [PRIVACY.md](./PRIVACY.md) and [docs/TECHNICAL.md](./docs/TECHNICAL.md) for the exact data flow.
 
@@ -157,12 +170,13 @@ Useful public checks:
 - **Language spoof** — enable/disable `navigator.language(s)`, Intl locale, and `Accept-Language` header override.
 - **Block WebRTC IP leak** — force WebRTC through the proxy so ICE candidates can't expose the real IP. Default on. Turn it off if you use WebRTC calls (e.g. video chat) over a proxy that has no UDP relay — with it on, such calls may fail to connect rather than leak.
 - **Hide CJK fonts** — strip region-revealing Chinese fonts from canvas/DOM width probes so they read as not-installed. Default on.
-- **Mask browser & device on other sites** — show ordinary Chrome/Chromium brands and an empty device model through UA / UA-CH, with matching request headers. Default off for other sites; always active on Claude and both verification sites. Reload pages after updating the extension.
+- **Mask browser & device on other sites** — show ordinary Chrome/Chromium brands and an empty device model through UA / UA-CH, with matching request headers. Default off for other sites; always active on the two verification sites. Anthropic pages use the per-visit selection. Reload pages after updating the extension.
 - **Spoof in Web Workers** *(experimental)* — extend timezone/locale spoofing into dedicated Web Workers. **Default off**, because it reloads worker code through a blob shim which can break WASM/bundled workers that rely on `self.location`. It probes for CSP `blob:` support and falls back to a native worker when blocked (so it won't silently kill workers), but enable it only if you need worker-level timezone hiding, and turn it off if a site's worker misbehaves.
 - **Force timezone** — pick a zone to **override exit-IP detection entirely**: the timezone, locale, and a representative coordinate are forced to that zone regardless of where the exit IP resolves (and regardless of whether detection succeeds). Use this to present a fixed non-China profile. Leave it on *Auto — use exit IP* to mirror the detected exit location instead. **Caveat:** forcing a timezone that differs from your real exit IP only hides it from *browser-side* checks (e.g. the fuck-claude test reads `Intl` timezone, which this spoofs); a service that reads your exit IP server-side can still see the IP↔timezone mismatch — the real fix for that is a proxy that exits where you want to appear.
 - **Reported accuracy (m)** — reported GPS accuracy, default 30 m.
 - **Auto-refresh interval (minutes)** — how often notme re-detects the exit IP.
 - **ipinfo.io token (optional)** — improves fallback reliability if you have a token.
+- **Network warning threshold (ms)** — maximum average probe latency for Anthropic admission; default 500 ms. WebRTC is a browser-wide setting: the last confirmed choice affects other tabs. Its per-visit switch applies protection or relinquishes notme's control; other surfaces stay specific to the approved tab.
 
 ## Claude Code (terminal): a separate timezone channel
 

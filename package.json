@@ -1,0 +1,10 @@
+{
+  "name": "notme",
+  "version": "1.7.0",
+  "private": true,
+  "scripts": {
+    "test": "node test/run-tests.js && node test/identity-tests.js && node --test test/network-tests.js",
+    "test:browser": "node test/browser-guard.mjs"
+  },
+  "devDependencies": { "playwright-core": "1.64.0" }
+}
