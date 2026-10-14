@@ -8,6 +8,23 @@ notme is a Chrome Manifest V3 extension for people who use proxies, VPNs, remote
 
 ---
 
+## Practical features
+
+| Feature | What it does |
+| --- | --- |
+| Choose before each visit | Opening or reloading a protected site runs checks and waits for your confirmation. Settings and per-visit choices share one page. |
+| Independent environment choices | Choose spoofing or native values for location, timezone, language/headers, device identity, fonts, Web Workers and WebRTC. Location also offers “Do not provide location,” the default. Save choices to preselect them next time. |
+| Site scope and independent tabs | Apply the selected profile only to approved Anthropic / Claude pages and the two listed verification sites. Other sites retain native language, timezone and browser signals; tabs do not overwrite one another. |
+| Exit and protocol diagnostics | Network checks appear first, with separate target, Cloudflare and UDP cards. HTTP/3 is verified from the actual protocol; HTTP/2 fallback still shows the test site's observed IP. |
+| Last 10 IP records | Keep the last ten valid visit observations per probed hostname, with IP and time. Expand to inspect them; records survive restarts, and repeated checks within a visit update its entry. |
+| Prominent IP-change notice | An orange banner above the checks shows the previous and current IP when they differ. A change alone does not block access; region restrictions still apply. |
+| Fast confirmation within 15 seconds | Use a completed check directly within 15 seconds. Older results trigger fresh checks, with UDP probing and HTTPS/HTTP3 rechecks running together. Settings changes invalidate the result; rerun checks after switching proxy routes. |
+| Restore the destination after restart | Gate pages retain the full destination URL. Restored tabs require a fresh check and confirmation. Addresses already lost by older versions must be recovered from browser history. |
+| Third-party exit-test compatibility | Allow HTTPS GET / fetch requests to the exact `/cdn-cgi/trace` path on protected domains. Other blocked requests from ordinary pages trigger a badge and system notification once per navigation. Live notices require an unpacked installation. |
+| Stable extension ID | Update by overwriting the existing extension directory and reloading, preserving the extension identity and saved preferences. |
+
+The two verification hosts are `fuck-claude.vercel.app` and `fuck-claude.app`. Their preflight checks the `claude.ai` exit, then confirmation opens the original site. Records describe the **client exit IP** observed by the diagnostic endpoint, not the website server's IP, and are stored locally only. The latency warning defaults to **1500 ms** and can be changed in advanced settings.
+
 ## Anthropic navigation checks
 
 Opening or reloading an Anthropic URL first redirects to a local environment selection page. Choose **Use notme spoofing**, **Use system defaults**, or set each surface independently. The static rules block the site's main HTML and subresources until the checks pass **and you click Confirm**. A previous visit or another tab does not authorize a new navigation.
@@ -22,7 +39,7 @@ The page also shows **UDP / STUN** and **HTTP/3 / QUIC** diagnostics. UDP uses C
 
 HTTP/3 uses Cloudflare's QUIC test host, `cloudflare-quic.com/cdn-cgi/trace`, as a third-party reference, making up to three sequential requests within eight seconds so the browser can learn Alt-Svc and retry. Only `http=http/3` verifies the HTTP/3 exit; HTTP/2/1.1 fallback and unknown protocols stay unverified. Every valid returned IP still participates in the mainland China / Hong Kong restriction, including fallback responses. The result explicitly describes the route to the test service, not Anthropic's route, and differences can result from split routing. This does not force HTTP/3 or test arbitrary UDP ports.
 
-Spoofing follows notme's existing automatic or forced-timezone workflow. The location, timezone, language/request headers, browser/device identity, fonts, Web Worker and WebRTC each have a spoof/default switch. A forced timezone is preserved even when it differs from the exit IP. After confirmation, the tab receives its own selected profile; language and identity headers stay native when their switches use system defaults. The first inline script receives the selected profile; a second tab with a different regional exit does not overwrite it. Resources under the protected roots are allowed in that approved tab; their individual exits are not separately checked.
+Spoofing follows notme's existing automatic or forced-timezone workflow. Location defaults to providing no coordinates, with spoofed and native options available. Timezone, language/request headers, browser/device identity, fonts, Web Worker and WebRTC each have a spoof/default switch. A forced timezone is preserved even when it differs from the exit IP. After confirmation, the tab receives its own selected profile; language and identity headers stay native when their switches use system defaults. The first inline script receives the selected profile; a second tab with a different regional exit does not overwrite it. Resources under the protected roots are allowed in that approved tab; their individual exits are not separately checked.
 
 **Chrome extension boundary:** existing Service Worker / CacheStorage responses and back-forward cache restorations can bypass Chrome's declarative network rules. Therefore loading this extension in an ordinary browser does not guarantee that previously cached page content can never appear before confirmation. This boundary has been reproduced in Chromium; see [Chrome's DNR documentation](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest#interactions_with_service_workers). On each protected navigation, notme removes Service Workers and CacheStorage for that exact target origin, preserving cookies, localStorage and IndexedDB. An unapproved cached commit is redirected back to the gate. These measures reduce cached bypasses but cannot guarantee zero rendering during a race or history restoration.
 
@@ -332,4 +349,3 @@ Pull requests welcome. Keep the permission surface minimal and preserve the no-t
 
 [MIT](./LICENSE)
 
-Third-party pages may GET `/cdn-cgi/trace` on protected domains; other paths remain guarded. With an unpacked installation, blocked requests from ordinary pages trigger a toolbar badge and a system notification once per page navigation. System notification visibility depends on OS settings.
