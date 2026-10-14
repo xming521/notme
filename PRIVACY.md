@@ -25,7 +25,7 @@ listed below, using the data needed for those checks.
 5. Page scripts also apply the configured timezone, locale, and font protections.
    Browser/device masking presents ordinary Chrome/Chromium brands and an empty
    device model, using a generic profile for the reported Chromium version and
-   OS family. Only Anthropic pages use the per-visit choices. Other sites,
+   OS family. Anthropic pages and the two verification hosts use per-visit choices. Other sites,
    except the two listed verification sites, retain native APIs.
 6. Declarative rules modify language and identity headers only on approved
    Anthropic destination requests and the two exact verification hosts. Browser/device masking adds no network endpoints or telemetry.
@@ -107,10 +107,9 @@ scripts match Anthropic origins, the two exact verification hosts and inherited-
 
 ## A note on trust
 
-Content scripts run on the seven Anthropic roots and their subdomains, plus the exact hosts `fuck-claude.vercel.app` and `fuck-claude.app`. Verification sites receive the cached environment and saved default choices without a navigation gate. Their language and identity headers are modified only when selected; no other Vercel hosts are included.
+Content scripts run on the seven Anthropic roots and their subdomains, plus the exact hosts `fuck-claude.vercel.app` and `fuck-claude.app`. Verification sites also require selection and confirmation before every visit or reload. Before confirmation, the extension sends no request to those hosts; it prepares the profile from the listed third-party diagnostics and IP services. Their language and identity headers are modified only when selected; no other Vercel hosts are included.
 Host permissions additionally allow the public IP/geolocation/map endpoints.
-The scripts do not read page contents. Header rules apply only to approved
-Anthropic destinations and the two exact verification hosts. On upgrade, old global header rules and notme's old
+The scripts do not read page contents. Header rules apply only within the approved tab to Anthropic destinations or the selected exact verification host. On upgrade, old global header rules and notme's old
 WebRTC privacy override are removed.
 
 `tabs` and `webNavigation` associate the pending URL and admission rules with

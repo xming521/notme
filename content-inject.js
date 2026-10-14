@@ -98,7 +98,7 @@
   let cache = null;
   // The gate delivers the checked profile in a fragment (never sent to the server).
   // Read it synchronously so the first inline site script cannot observe native defaults.
-  if (ON_ANTHROPIC && location.hash?.startsWith('#__notme_entry=')) {
+  if (location.hash?.startsWith('#__notme_entry=')) {
     try {
       const raw = atob(location.hash.slice('#__notme_entry='.length));
       const entry = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, character => character.charCodeAt(0))));
@@ -106,7 +106,7 @@
       history.replaceState(history.state, '', location.pathname + location.search + (entry.hash || ''));
     } catch (_) {}
   }
-  if (cache?.guardSelection && !cache.enabled && !cache.tzEnabled && !cache.langEnabled
+  if (cache?.guardSelection && cache.geoMode !== 'blocked' && !cache.enabled && !cache.tzEnabled && !cache.langEnabled
     && !cache.identityEnabled && !cache.fontEnabled && !cache.workerEnabled && !cache.webrtcProtect) return;
   let readyResolve;
   const ready = new Promise((r) => { readyResolve = r; });
@@ -262,7 +262,13 @@
     return pos;
   }
 
-  function isGeoDisabled() { return !cache || cache.enabled === false; }
+  function isGeoDisabled() { return !!cache && cache.geoMode !== 'blocked' && cache.enabled === false; }
+  function denyLocation(error) {
+    if (typeof error !== 'function') return;
+    const denied = { code: 1, message: 'Location access denied', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 };
+    try { Object.setPrototypeOf(denied, GeolocationPositionError.prototype); } catch (_) {}
+    error(denied);
+  }
 
   (function installGeolocation() {
     const proto = realGeo && Object.getPrototypeOf(realGeo);
@@ -278,6 +284,7 @@
       const self = this;
       if (isGeoDisabled()) { try { return realGetCurrent.call(self, success, error, options); } catch (_) {} }
       ready.then(() => {
+        if (cache.geoMode === 'blocked') { denyLocation(error); return; }
         if (isGeoDisabled()) { try { return realGetCurrent.call(self, success, error, options); } catch (_) {} }
         if (!cache || cache.lat == null) {
           if (typeof error === 'function') error({ code: 2, message: 'Position unavailable' });
@@ -294,7 +301,7 @@
       if (isGeoDisabled()) { try { return realWatch.call(this, success, error, options); } catch (_) {} }
       getCurrentPosition.call(this, success, error, options);
       const id = ++watchCounter;
-      watchHandlers[id] = () => { if (!isGeoDisabled() && cache && cache.lat != null) success(buildPosition()); };
+      watchHandlers[id] = () => { if (cache?.enabled && cache.geoMode !== 'blocked' && cache.lat != null) success(buildPosition()); };
       return id;
     });
 
@@ -318,11 +325,13 @@
       if (!proto || typeof proto.query !== 'function') return;
       const realQuery = proto.query;
       const wrapped = makeMethod('query', 1, function (desc) {
-        if (isGeoDisabled() || !desc || desc.name !== 'geolocation') return realQuery.call(this, desc);
-        return realQuery.call(this, desc).then((status) => {
-          try { Object.defineProperty(status, 'state', { configurable: true, enumerable: true, get: () => 'granted' }); } catch (_) {}
+        if (!desc || desc.name !== 'geolocation') return realQuery.call(this, desc);
+        return ready.then(() => realQuery.call(this, desc)).then((status) => {
+          const nativeState = status.state;
+          try { Object.defineProperty(status, 'state', { configurable: true, enumerable: true,
+            get: () => cache.geoMode === 'blocked' ? 'denied' : cache.enabled ? 'granted' : nativeState }); } catch (_) {}
           return status;
-        }).catch(() => ({ state: 'granted', onchange: null }));
+        });
       });
       proto.query = wrapped;
     } catch (_) {}

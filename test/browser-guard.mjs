@@ -168,6 +168,11 @@ try {
     await wait(async () => await page.locator('#retry').isEnabled());
   };
   const location = page => page.evaluate(() => new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(p => resolve({ lat:p.coords.latitude, lon:p.coords.longitude }), reject)));
+  const deniedLocation = page => page.evaluate(async () => {
+    const get = await new Promise(resolve => navigator.geolocation.getCurrentPosition(() => resolve('leaked'), error => resolve(error.code)));
+    const watch = await new Promise(resolve => { let id; id = navigator.geolocation.watchPosition(() => { navigator.geolocation.clearWatch(id); resolve('leaked'); }, error => { navigator.geolocation.clearWatch(id); resolve(error.code); }); });
+    return { get, watch, permission: (await navigator.permissions.query({name:'geolocation'})).state };
+  });
   const workerProfile = page => page.evaluate(() => new Promise((resolve, reject) => {
     const worker = new Worker('/worker.js'); worker.onmessage = event => { resolve(event.data); worker.terminate(); }; worker.onerror = reject;
   }));
@@ -243,6 +248,11 @@ try {
   assert.equal(await page.evaluate(()=>{try{new RTCPeerConnection.prototype.constructor({iceServers:[]});return 'allowed';}catch(error){return error.name;}}),'NotAllowedError');
   assert.notEqual((await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.get({}))).levelOfControl,'controlled_by_this_extension');
   pass('点击确认后才加载网站；第一个内联脚本已获得正确时区、语言与标识，HTTP 头同步');
+  assert.deepEqual(await deniedLocation(page),{get:1,watch:1,permission:'denied'});
+  assert.equal(traffic.some(item=>/overpass|maps\.mail|api\.bigdatacloud/.test(item.host)),false);
+  const blank=await page.evaluateHandle(()=>{const frame=document.createElement('iframe');document.body.append(frame);return frame.contentWindow;});
+  assert.equal(await blank.evaluate(win=>new Promise(resolve=>win.navigator.geolocation.getCurrentPosition(()=>resolve('leaked'),error=>resolve(error.code)))),1);
+  pass('默认拒绝定位，getCurrentPosition、watchPosition 和继承框架都不返回坐标，且不查询住宅街道或地址');
 
   const outside=await context.newPage();
   for(const host of ['outside.test','claude.ai.evil.test','fakeanthropic.com','fuck-claude.app.evil.test','www.fuck-claude.vercel.app','other.vercel.app']) {
@@ -253,41 +263,59 @@ try {
 
   const verification = await context.newPage();
   for (const host of Network.VERIFICATION_DOMAINS) {
-    await verification.goto(`https://${host}/verification-default`);
-    await verification.locator('#formal').waitFor();
-    await wait(async()=>await verification.evaluate(()=>navigator.language==='en-US'));
-    assert.equal(await verification.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone),'America/Los_Angeles');
-    const header=traffic.findLast(item=>item.host===host&&item.path==='/verification-default');
-    assert.equal(header.language,'en-US,en;q=0.9');
+    traffic.length=0;await openGate(verification,`https://${host}/verification-choice#scan`);
+    assert.equal(formalRequests().length,0);
+    assert.equal(traffic.some(item=>item.host===host),false);
+    assert.match(await checkDetails(verification),/确认前不请求检测站/);
+    assert.match(await verification.locator('#environment-info').textContent(),/第三方查 IP 服务参考出口/);
+    await confirm(verification);
+    assert.deepEqual(await verification.evaluate(()=>({language:window.first.language,zone:window.first.zone,hash:window.first.hash})),
+      {language:'en-US',zone:'America/Los_Angeles',hash:'#scan'});
+    assert.equal(traffic.findLast(item=>item.host===host&&item.path==='/verification-choice').language,'en-US,en;q=0.9');
     assert.equal(await rtc(verification),'NotAllowedError');
-    const geo=await location(verification);assert.notDeepEqual(geo,{lat:31.23,lon:121.47});
+    assert.deepEqual(await deniedLocation(verification),{get:1,watch:1,permission:'denied'});
     const widths=await fontWidths(verification);assert.equal(widths.custom,widths.generic);
-    assert.deepEqual(await workerProfile(verification),baselineWorker);
-    assert.equal(await verification.evaluate(()=>('GeoMirrorTZ' in window)||('NotmeIdentity' in window)),false);
   }
-  pass('两个指定检测站直接使用保存的默认环境，时区、语言、位置、字体、WebRTC 与请求头生效');
+  pass('两个检测站先选择并确认本次环境，确认前对检测站零请求，首个脚本及请求头已使用伪装');
 
-  const verificationDefaults=Object.fromEntries(['enabled','tzEnabled','langEnabled','identityEnabled','fontEnabled','workerEnabled','webrtcProtect'].map(key=>[key,true]));
-  await send({type:'SET_SETTINGS',patch:{guardDefaults:{...verificationDefaults,langEnabled:false}}});
-  await wait(async()=>await verification.evaluate(()=>navigator.language===navigator.languages[0]&&navigator.language==='zh-CN'));
+  traffic.length=0;await verification.reload();
+  await wait(async()=>verification.url().startsWith(`chrome-extension://${id}/gate.html`)&&await verification.locator('#retry').isEnabled());
+  assert.equal(formalRequests().length,0);assert.equal(await verification.locator('#formal').count(),0);
+  await preset(verification,'全部使用系统默认');await confirm(verification);
+  assert.deepEqual(await verification.evaluate(()=>({language:window.first.language,zone:window.first.zone,ua:window.first.ua})),original);
+  assert.deepEqual(await location(verification),{lat:31.23,lon:121.47});
+  assert.deepEqual(await workerProfile(verification),baselineWorker);assert.equal(await rtc(verification),'allowed');
+  const nativeWidths=await fontWidths(verification);assert.notEqual(nativeWidths.custom,nativeWidths.generic);
+  assert.ok(traffic.findLast(item=>item.host==='fuck-claude.app'&&item.path==='/verification-choice').language.startsWith(original.language));
+  pass('检测站刷新重新选择，全部系统默认保留首个脚本、GPS、Worker、字体、WebRTC 和请求头的原生值');
+
+  traffic.length=0;await openGate(verification,'https://fuck-claude.app/verification-mixed');
+  await select(verification,'语言与请求头','系统默认');await select(verification,'后台脚本（Web Worker）','伪装');
+  assert.equal(formalRequests().length,0);await confirm(verification);
+  assert.equal((await verification.evaluate(()=>window.first)).language,original.language);
+  assert.equal((await verification.evaluate(()=>window.first)).zone,'America/Los_Angeles');
+  assert.ok(traffic.findLast(item=>item.host==='fuck-claude.app'&&item.path==='/verification-mixed').language.startsWith(original.language));
+  await workerProfile(verification);await wait(async()=>(await workerProfile(verification)).zone==='America/Los_Angeles');
+  pass('进入检测站前逐项选择，语言用系统默认而时区及 Worker 伪装，本次选择无需保存默认');
+
+  const secondVerification=await context.newPage();traffic.length=0;
+  await openGate(secondVerification,'https://fuck-claude.vercel.app/verification-independent');
+  assert.equal(await secondVerification.locator('input[name="langEnabled"][value="spoof"]').isChecked(),true);
+  await preset(secondVerification,'全部使用系统默认');await confirm(secondVerification);
+  assert.equal((await secondVerification.evaluate(()=>window.first)).zone,original.zone);
   assert.equal(await verification.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone),'America/Los_Angeles');
-  await workerProfile(verification);
-  await wait(async()=>(await workerProfile(verification)).zone==='America/Los_Angeles');
-  await verification.goto('https://fuck-claude.app/verification-mixed');
-  await wait(async()=>await verification.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone==='America/Los_Angeles'));
-  assert.equal(traffic.findLast(item=>item.host==='fuck-claude.app'&&item.path==='/verification-mixed').language.startsWith(original.language),true);
-  assert.equal(await verification.evaluate(()=>navigator.language),original.language);
-  pass('检测站遵循独立默认开关，语言可恢复原生而时区及 Worker 继续伪装，已打开页面同步更新');
+  await send({type:'SET_SETTINGS',patch:{guardDefaults:Object.fromEntries(['enabled','tzEnabled','langEnabled','identityEnabled','fontEnabled','workerEnabled','webrtcProtect'].map(key=>[key,false]))}});
+  assert.equal(await verification.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone),'America/Los_Angeles');
+  await send({type:'SET_SETTINGS',patch:{guardDefaults:null}});await secondVerification.close();await verification.close();
+  pass('检测站标签页各用本次配置，不覆盖默认或其他标签页，修改默认也不覆盖已确认环境');
 
-  await send({type:'SET_SETTINGS',patch:{guardDefaults:Object.fromEntries(Object.keys(verificationDefaults).map(key=>[key,false]))}});
-  await wait(async()=>await verification.evaluate(()=>Intl.DateTimeFormat().resolvedOptions().timeZone==='Asia/Shanghai'));
-  for(const host of Network.VERIFICATION_DOMAINS) await verifyOrdinary(verification,`https://${host}/verification-native`);
-  pass('默认选择全部系统默认时，两个检测站的 API、GPS、字体、Worker、WebRTC 和请求头恢复原生');
-  await send({type:'SET_SETTINGS',patch:{guardDefaults:null}});
-  await verification.close();
-  const denied=await send({type:'NOTME_VERIFICATION_PROFILE'});
-  assert.match(denied.error,/消息来源无效/);
-  pass('检测站配置接口拒绝非检测站页面调用');
+  policies.set('reallyfreegeoip.org',{country:'CN',ip:'203.0.113.99'});
+  const blockedVerification=await context.newPage();traffic.length=0;
+  await openGate(blockedVerification,'https://fuck-claude.app/verification-blocked');
+  await preset(blockedVerification,'全部使用系统默认');
+  assert.equal(await blockedVerification.locator('#confirm').isEnabled(),false);assert.equal(formalRequests().length,0);
+  policies.delete('reallyfreegeoip.org');await blockedVerification.close();
+  pass('检测站进入前发现大陆出口时禁止确认，系统默认不能绕过，正式页面保持零请求');
 
   traffic.length = 0;
   await page.reload();
@@ -426,15 +454,28 @@ try {
   await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.clear({}));
   await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.clear({}));
   traffic.length=0;await openGate(another,'https://claude.ai/udp-match');
-  assert.ok((await checkDetails(another)).includes('与目标 HTTPS 出口一致'));
+  assert.ok((await checkDetails(another)).includes('与目标站出口相同'));
   assert.ok(udpRequests>beforeRestricted);assert.equal(formalRequests().length,0);
   assert.equal(await another.locator('#confirm').isEnabled(),true);
-  assert.ok((await checkDetails(another)).includes('目标 TCP（claude.ai）'));
-  assert.ok((await checkDetails(another)).includes('测试站实际使用 HTTP/2'));
+  assert.ok((await checkDetails(another)).includes('目标站出口'));
+  assert.ok((await checkDetails(another)).includes('HTTP/2'));
+  const fallbackCard=await another.locator('#cloudflare-network').innerText();
+  assert.match(fallbackCard,/203\.0\.113\.42/);assert.match(fallbackCard,/HTTP\/2/);
+  assert.equal((fallbackCard.match(/HTTP\/3 未验证/g)||[]).length,1);
+  assert.doesNotMatch(await another.locator('#target-network').innerText(),/Cloudflare|HTTP\/3 未验证/);
+  assert.doesNotMatch(await checkDetails(another),/查 IP 服务出口/);
+  assert.equal(await another.evaluate(()=>document.querySelector('#diagnostics').getBoundingClientRect().top<document.querySelector('#choices').getBoundingClientRect().top),true);
+  assert.ok(await another.evaluate(()=>parseFloat(getComputedStyle(document.body).fontSize)>=18));
+  assert.equal(await another.locator('#checks .network-card').count(),3);
+  await another.setViewportSize({width:390,height:844});
+  assert.equal(await another.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await another.setViewportSize({width:1100,height:1050});
+  await mkdir('test-results',{recursive:true});await another.screenshot({path:'test-results/network-preview.png',clip:{x:0,y:0,width:1100,height:930}});
   pass('真实浏览器经本地 UDP/STUN 收到响应；HTTP/2 和 Alt-Svc 不会误报 HTTP/3');
+  pass('网络检查置顶、字体清晰且窄屏不横向溢出，HTTP/2 回退仍显示 Cloudflare 出口，状态与来源不重复');
 
   udpIP='203.0.113.99';traffic.length=0;await openGate(another,'https://claude.ai/udp-different');
-  assert.match(await checkDetails(another),/UDP 出口 203\.0\.113\.99 · US 与目标 HTTPS 出口 203\.0\.113\.42 不同，可能由分流产生，不代表异常/);
+  assert.match(await checkDetails(another),/203\.0\.113\.99/);
   assert.equal(formalRequests().length,0);assert.equal(await another.locator('#confirm').isEnabled(),true);
   assert.ok((await another.locator('#checks .check').filter({hasText:'UDP / STUN'}).getAttribute('class')).includes('info'));
   pass('UDP 与 HTTPS 出口不同只显示第三方分流参考，不判为异常，确认前零正式请求');
@@ -443,8 +484,8 @@ try {
     policies.set('ipwho.is/203.0.113.99',{country});
     traffic.length=0;await openGate(another,`https://claude.ai/stun-${country}`);
     assert.equal(await another.locator('#confirm').isEnabled(),false);
-    assert.match(await checkDetails(another),/UDP 出口.*禁止访问/);
-    assert.match(await checkDetails(another),/第三方参考.*不代表 Anthropic/);
+    assert.match(await checkDetails(another),/禁止访问/);
+    assert.ok((await another.locator('#udp-network').getAttribute('class')).includes('fail'));
     assert.equal(formalRequests().length,0);
   }
   policies.delete('ipwho.is/203.0.113.99');
@@ -473,7 +514,7 @@ try {
   pass('STUN 超时报告 UDP 未验证，不假定网络故障或阻止正常 HTTPS 访问');
 
   policies.set('claude.ai',{protocol:'http/3'});await openGate(another,'https://claude.ai/h3-observed');
-  assert.ok((await checkDetails(another)).includes('目标 HTTP/3（claude.ai）'));
+  assert.ok((await checkDetails(another)).includes('HTTP/3'));
   assert.equal(await another.locator('#confirm').isEnabled(),true);
   policies.delete('claude.ai');await send({type:'SET_SETTINGS',patch:{webrtcProtect:true}});
   pass('HTTP/3 仅根据目标 trace 的实际协议字段显示已验证');
@@ -482,11 +523,11 @@ try {
   traffic.length=0;await openGate(another,'https://claude.ai/third-party-h3-match');
   assert.match(await another.locator('#environment-info').textContent(),/目标站 claude.ai 的 HTTPS 请求出口/);
   await checkDetails(another);
-  const thirdPartyExit=another.locator('#checks .check').filter({hasText:'出口 IP / 地区'});
-  assert.match(await thirdPartyExit.innerText(),/目标 TCP（claude.ai）：203\.0\.113\.42/);
-  assert.match(await thirdPartyExit.innerText(),/HTTP\/3 出口：203\.0\.113\.42/);
-  assert.match(await thirdPartyExit.innerText(),/与目标 HTTPS 出口一致/);
-  assert.match(await thirdPartyExit.innerText(),/第三方参考，仅代表到测试站的出口，不代表 Anthropic/);
+  const thirdPartyExit=another.locator('#cloudflare-network');
+  assert.match(await another.locator('#target-network').innerText(),/203\.0\.113\.42/);
+  assert.match(await thirdPartyExit.innerText(),/203\.0\.113\.42/);
+  assert.match(await thirdPartyExit.innerText(),/与目标站出口相同/);
+  assert.match(await thirdPartyExit.innerText(),/HTTP\/3 已验证/);assert.match(await another.locator('.network-note').innerText(),/第三方测试路径/);
   assert.ok((await thirdPartyExit.getAttribute('class')).includes('ok'));
   assert.equal(await another.locator('#confirm').isEnabled(),true);
   assert.ok(traffic.some(item=>item.host===Network.HTTP3_TEST_HOST && item.path==='/cdn-cgi/trace' && !item.cookie));
@@ -496,8 +537,8 @@ try {
   policies.set(Network.HTTP3_TEST_HOST,{protocol:'http/3',ip:'203.0.113.99'});
   await openGate(another,'https://claude.ai/third-party-h3-difference');
   await checkDetails(another);
-  assert.match(await thirdPartyExit.innerText(),/HTTP\/3 出口：203\.0\.113\.99/);
-  assert.match(await thirdPartyExit.innerText(),/与目标 HTTPS 出口不同，可能由分流产生，不代表异常/);
+  assert.match(await thirdPartyExit.innerText(),/203\.0\.113\.99/);
+  assert.match(await thirdPartyExit.innerText(),/与目标站出口不同/);
   assert.ok((await thirdPartyExit.getAttribute('class')).includes('info'));
   assert.equal(await another.locator('#confirm').isEnabled(),true);
   assert.equal(formalRequests().length,0);
@@ -530,9 +571,10 @@ try {
   policies.set('reallyfreegeoip.org',{country:'CN',ip:'not-an-ip'});
   await openGate(another,'https://claude.ai/invalid-ip-region');
   assert.equal(await another.locator('#confirm').isEnabled(),true);
-  assert.match(await checkDetails(another),/未取得有效出口信息/);
+  assert.doesNotMatch(await checkDetails(another),/not-an-ip/);
+  assert.doesNotMatch(await checkDetails(another),/查 IP 服务出口/);
   policies.delete('reallyfreegeoip.org');
-  pass('查 IP 服务的无效地址不被当作已发现的大陆出口，仍显示该来源未验证');
+  pass('查 IP 服务的无效地址不触发大陆封禁，其他有效来源仍可完成检查');
 
   traffic.length=0;await openGate(another,'https://claude.ai/confirm-third-party-region');
   policies.set(Network.HTTP3_TEST_HOST,{protocol:'http/2',country:'HK',ip:'203.0.113.99'});
@@ -557,7 +599,7 @@ try {
   policies.set(Network.HTTP3_TEST_HOST,{invalid:true});
   await openGate(another,'https://claude.ai/third-party-h3-unknown');
   await checkDetails(another);
-  assert.match(await thirdPartyExit.innerText(),/HTTP\/3 出口未验证/);
+  assert.match(await thirdPartyExit.innerText(),/HTTP\/3 未验证/);
   assert.ok((await thirdPartyExit.getAttribute('class')).includes('info'));
   assert.equal(await another.locator('#confirm').isEnabled(),true);
   policies.delete(Network.HTTP3_TEST_HOST);
@@ -566,7 +608,7 @@ try {
 
   traffic.length=0;await openGate(another,'https://claude.ai/inline-settings');
   assert.equal(await another.locator('#advanced').evaluate(node => node.open),false);
-  assert.equal(await another.locator('#diagnostics').evaluate(node => node.open),false);
+  assert.equal(await another.locator('#diagnostics').evaluate(node => node.open),true);
   await another.locator('#manualTz').selectOption('Asia/Tokyo');
   await wait(async () => (await send({type:'GET_STATE'})).settings.manualTz === 'Asia/Tokyo' && await another.locator('#retry').isEnabled());
   assert.ok((await another.locator('#detail-tzEnabled').innerText()).includes('Asia/Tokyo'));
@@ -576,6 +618,7 @@ try {
   pass('在环境选择页直接修改时区，自动保存并重新检查；确认前零正式请求，首个脚本使用新时区与语言');
 
   await openGate(another,'https://claude.ai/advanced-settings');
+  await select(another,'地理位置','伪装');
   await another.locator('#advanced > summary').click();
   const beforePreferences=(await send({type:'GET_STATE'})).settings;
   policies.set('claude.ai',{delayMs:150});
@@ -604,7 +647,7 @@ try {
   assert.equal(formalRequests().length,0);await confirm(remembered);
   assert.deepEqual(await remembered.evaluate(() => ({language:window.first.language,zone:window.first.zone,ua:window.first.ua})),original);
   await preset(another,'使用 notme 伪装');
-  assert.equal(await another.locator('#choices input[value="spoof"]:checked').count(),6);
+  assert.equal(await another.locator('#choices input[value="spoof"]:checked').count(),5);
   await another.locator('#save-defaults').click();
   await wait(async()=>await another.locator('#retry').isEnabled());
   const afterSave=await context.newPage();await verifyOrdinary(afterSave,'https://outside.test/after-save');await afterSave.close();
@@ -624,7 +667,7 @@ try {
     await chrome.storage.local.set({settings:{...settings,enabled:true,tzEnabled:true,langEnabled:true,fontEnabled:true,identityEnabled:true,workerEnabled:true,webrtcProtect:true}});
     await chrome.storage.session.set({guardWebRTCProtect:true});
     await chrome.privacy.network.webRTCIPHandlingPolicy.set({value:'disable_non_proxied_udp'});
-    await chrome.declarativeNetRequest.updateDynamicRules({addRules:[9001,9002,9003,9004,9005].map(id=>({
+    await chrome.declarativeNetRequest.updateDynamicRules({addRules:[9001,9002,9003,9004,9005,19000,19001].map(id=>({
       id,priority:1000,action:{type:'modifyHeaders',requestHeaders:[{header:'accept-language',operation:'set',value:'en-US,en;q=0.9'}]},
       condition:{urlFilter:'*',resourceTypes:['main_frame','sub_frame','xmlhttprequest']},
     }))});
@@ -644,7 +687,7 @@ try {
   control=await context.newPage();await control.goto(`chrome-extension://${id}/gate.html?settings`);
   const movedSettings=(await send({type:'GET_STATE'})).settings;
   assert.equal(movedSettings.accuracyM,45);assert.deepEqual(movedSettings.guardDefaults,savedDefaults);
-  assert.equal((await control.evaluate(()=>chrome.declarativeNetRequest.getDynamicRules())).some(rule=>[9001,9002,9003,9004,9005].includes(rule.id)),false);
+  assert.equal((await control.evaluate(()=>chrome.declarativeNetRequest.getDynamicRules())).some(rule=>[9001,9002,9003,9004,9005,19000,19001].includes(rule.id)),false);
   assert.notEqual((await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.get({}))).levelOfControl,'controlled_by_this_extension');
   const restored=await context.newPage();await verifyOrdinary(restored,'https://outside.test/after-upgrade');await restored.close();
   pass('升级清除旧全局语言规则和 WebRTC 策略；旧的全开设置保留时普通网站仍完全原生');

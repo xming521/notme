@@ -8,6 +8,49 @@ const UDP = require('../lib/udp.js');
 const trace = (country = 'US', ip = '203.0.113.42') => ({ ip, country, colo: 'LAX' });
 const probe = (country = 'US') => ({ reachable: true, status: 200, durationMs: 30, trace: trace(country) });
 
+test('默认不提供位置，明确选择后才允许位置伪装或系统定位', () => {
+  for (const guardDefaults of [undefined, {enabled:true}, {enabled:false}]) {
+    const selected=Environment.defaultSelection({guardDefaults});
+    assert.equal(selected.geoMode,'blocked');assert.equal(selected.enabled,false);
+  }
+  assert.equal(Environment.normalizeSelection({geoMode:'spoof'},{}).enabled,true);
+  assert.equal(Environment.normalizeSelection({geoMode:'native'},{}).enabled,false);
+  assert.equal(Environment.defaultSelection({guardDefaults:{geoMode:'native'}}).geoMode,'native');
+});
+
+test('地区服务并行查询并收集较晚返回的限制地区，不因先返回正常地区而跳过拦截', async () => {
+  const native=global.fetch;let active=0,peak=0;const observations=[];
+  global.fetch=async url=>{
+    active++;peak=Math.max(peak,active);
+    await new Promise(resolve=>setTimeout(resolve,url.includes('ipinfo')?35:10));active--;
+    const country=url.includes('ipinfo')?'HK':'US';
+    return new Response(JSON.stringify({ip:'203.0.113.42',success:true,country_code:country,country,
+      latitude:34,longitude:-118,loc:'34,-118',timezone:'America/Los_Angeles'}));
+  };
+  try {
+    const observe=item=>observations.push({...item,source:item.provider});
+    assert.equal((await Providers.getCountryForIP('203.0.113.42','',observe)).countryCode,'US');
+    assert.equal(peak,3);
+    assert.equal(Network.applyExitPolicy(Network.assessProbes('claude.ai',[probe(),probe(),probe()]),observations).regionBlocked,true);
+    peak=0;observations.length=0;
+    await Providers.getIPLocation('',observe);
+    assert.equal(peak,4);
+    assert.ok(observations.some(item=>item.countryCode==='HK'));
+  } finally {global.fetch=native;}
+});
+
+test('地区查询的超时包含响应正文，服务不结束 JSON 时仍按时终止', {timeout:1000}, async () => {
+  const native=global.fetch;const signals=[];
+  global.fetch=async (_url,{signal})=>{
+    signals.push(signal);
+    return {ok:true,json:()=>new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true}))};
+  };
+  try {
+    assert.equal(await Providers.getCountryForIP('203.0.113.42','',undefined,{timeoutMs:35}),null);
+    assert.equal(signals.length,3);assert.ok(signals.every(signal=>signal.aborted));
+  } finally {global.fetch=native;}
+});
+
 test('主域及新子域受保护，仿冒域名不匹配', () => {
   for (const root of Network.ROOT_DOMAINS) {
     assert.equal(Network.protectedHost(`https://a.b.${root}/`), `a.b.${root}`);
@@ -15,13 +58,14 @@ test('主域及新子域受保护，仿冒域名不匹配', () => {
     assert.equal(Network.protectedHost(`https://evil${root}/`), null);
   }
 });
-test('两个检测站仅匹配指定域名，不扩大到子域或整个 Vercel 平台，也不进入 Anthropic 闸门', () => {
+test('两个检测站进入访问闸门，仅匹配指定域名，不扩大到子域或整个 Vercel 平台', () => {
   for (const host of Network.VERIFICATION_DOMAINS) {
     assert.equal(Network.verificationHost(`https://${host}/scan`), host);
     assert.equal(Network.verificationHost(`https://${host.toUpperCase()}./`), host);
-    assert.equal(Network.protectedHost(`https://${host}/`), null);
+    assert.equal(Network.protectedHost(`https://${host}/`), host);
     for (const value of [`https://sub.${host}/`, `https://${host}.evil.test/`, `ftp://${host}/`]) {
       assert.equal(Network.verificationHost(value), null);
+      assert.equal(Network.protectedHost(value), null);
     }
   }
   assert.equal(Network.verificationHost('https://other.vercel.app/'), null);
@@ -146,6 +190,7 @@ test('第三方的 HTTP/2、错误主机、无效响应及超时都不能冒充 
     const check = Network.withThirdPartyHTTP3(target, result).checks.find(check => check.name.includes('第三方参考'));
     assert.equal(check.status, 'info');
     assert.match(check.detail, /HTTP\/3 出口未验证/);
+    if(body.includes('http=http/2')){assert.match(check.detail,/测试站出口：203\.0\.113\.42/);assert.match(check.detail,/实际协议：HTTP\/2/);}
     assert.doesNotMatch(check.detail, /与目标 HTTPS 出口一致/);
   }
   const timeout = await Network.probeThirdPartyHTTP3({ ...Network.DEFAULT_SETTINGS, timeoutMs: 5 },
@@ -160,14 +205,15 @@ test('第三方 HTTP/3 比较标清来源，保留目标出口和访问判定，
     const result = { host: Network.HTTP3_TEST_HOST, trace: { ...trace(country, ip), protocol: 'http/3' } };
     const report = Network.withThirdPartyHTTP3(target, result);
     const exit = report.checks.find(check => check.name === '出口 IP / 地区');
+    const diagnostic = report.checks.find(check => check.name.includes('第三方参考'));
+    assert.deepEqual(exit,target.checks.find(check => check.name === '出口 IP / 地区'));
+    assert.equal(diagnostic.status,status);
     assert.equal(report.trace, target.trace);
     assert.equal(report.status, 'ok');
-    assert.equal(exit.status, status);
-    assert.equal(exit.blocking, false);
-    assert.match(exit.detail, /目标 TCP（claude.ai）：203\.0\.113\.42/);
-    assert.ok(exit.detail.includes(`HTTP/3 出口：${ip} · ${country}`));
-    assert.match(exit.detail, /第三方参考，仅代表到测试站的出口，不代表 Anthropic/);
-    assert.match(exit.detail, status === 'ok' ? /与目标 HTTPS 出口一致/ : /与目标 HTTPS 出口不同，可能由分流产生，不代表异常/);
+
+    assert.ok(diagnostic.detail.includes(`HTTP/3 出口：${ip} · ${country}`));
+    assert.match(diagnostic.detail, /第三方参考，仅代表到测试站的出口，不代表 Anthropic/);
+    assert.match(diagnostic.detail, status === 'ok' ? /与目标 HTTPS 出口一致/ : /与目标 HTTPS 出口不同，可能由分流产生，不代表异常/);
   }
   const restricted = Network.assessProbes('claude.ai', [probe('HK'), probe('HK'), probe('HK')]);
   const report = Network.withThirdPartyHTTP3(restricted, { host: Network.HTTP3_TEST_HOST, trace: { ...trace(), protocol: 'http/3' } });

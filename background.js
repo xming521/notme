@@ -31,7 +31,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const ALARM = 'refresh';
-const LEGACY_HEADER_RULE_IDS = [9001, 9002, 9003, 9004, 9005];
+const LEGACY_HEADER_RULE_IDS = [9001, 9002, 9003, 9004, 9005, 19000, 19001];
 const IDENTITY_PROFILE = NotmeIdentity.fromNavigator(typeof navigator !== 'undefined' ? navigator : {});
 
 async function getSettings() {
@@ -66,44 +66,13 @@ async function migrateNetworkWarning() {
 }
 const legacyCleanup = Promise.all([clearLegacyEffects(), migrateNetworkWarning()]);
 
-async function verificationProfile() {
-  const settings = await getSettings();
-  const { override } = await chrome.storage.local.get('override');
-  return { ...override, ...NotmeEnvironment.defaultSelection(settings),
-    guardSelection: true, acc: settings.accuracyM, identityProfile: IDENTITY_PROFILE };
-}
-
-let verificationUpdates = legacyCleanup;
-function syncVerificationRules() {
-  const task = verificationUpdates.then(async () => {
-    const profile = await verificationProfile();
-    const headers = [
-      ...(profile.langEnabled && profile.acceptLanguage ? [{ header: 'accept-language', operation: 'set', value: profile.acceptLanguage }] : []),
-      ...(profile.identityEnabled ? NotmeIdentity.requestHeaders(IDENTITY_PROFILE) : []),
-    ];
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [19000, 19001],
-      addRules: headers.length ? NotmeNetwork.VERIFICATION_DOMAINS.map((host, index) => ({
-        id: 19000 + index, priority: 3000, action: { type: 'modifyHeaders', requestHeaders: headers },
-        condition: { regexFilter: NotmeNetwork.hostFilter(host), resourceTypes: [
-          'main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest',
-          'ping', 'csp_report', 'media', 'websocket', 'webtransport', 'webbundle', 'other',
-        ] },
-      })) : [],
-    });
-  });
-  verificationUpdates = task.catch(error => console.error('notme verification:', error));
-  return task;
-}
-const verificationReady = syncVerificationRules();
-
 /** Build an override from the user's manual timezone (fallback when the exit-IP
  *  path can't confirm a timezone). Coordinates come from the timezone's profile
  *  city (jittered) so geolocation stays consistent; locale is inferred the same
  *  way as the auto path. */
 function buildManualOverride(s, now, note) {
   const prof = TZData.profileForTz(s.manualTz);
-  const j = (prof.lat != null) ? GeoUtil.jitterCoord(prof.lat, prof.lon, 300, 1500) : null;
+  const j = NotmeEnvironment.defaultSelection(s).enabled && prof.lat != null ? GeoUtil.jitterCoord(prof.lat, prof.lon, 300, 1500) : null;
   const loc = Locale.localeFor(prof.cc, s.manualTz);
   const override = {
     lat: j ? j.lat : null, lon: j ? j.lon : null, acc: s.accuracyM,
@@ -148,7 +117,6 @@ async function refresh() {
       }
     } catch (_) {}
     await chrome.storage.local.set({ override, state });
-    await syncVerificationRules();
     return;
   }
 
@@ -161,10 +129,10 @@ async function refresh() {
       if (location) Object.assign(ip, location);
     }
 
-    const pick = await GeoUtil.chooseResidential(ip.lat, ip.lon, {
-      radius: 2500, limit: 150, timeoutMs: 12000,
-    });
-    const addr = await IPLoc.getDisplayAddress(pick.lat, pick.lon);
+    const pick = NotmeEnvironment.defaultSelection(s).enabled
+      ? await GeoUtil.chooseResidential(ip.lat, ip.lon, { radius: 2500, limit: 150, timeoutMs: 1500 })
+      : { lat: null, lon: null, source: null };
+    const addr = pick.lat == null ? null : await IPLoc.getDisplayAddress(pick.lat, pick.lon);
 
     const timezone = ip.timezone || null;
     const loc = Locale.localeFor(ip.countryCode, timezone);
@@ -193,7 +161,6 @@ async function refresh() {
       lastUpdated: now, lastError: null,
     };
     await chrome.storage.local.set({ override, state });
-    await syncVerificationRules();
   } catch (e) {
     await patchState({ status: 'error', lastError: String((e && e.message) || e), lastUpdated: now });
   }
@@ -226,14 +193,6 @@ chrome.alarms.onAlarm.addListener((a) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.type === 'NOTME_VERIFICATION_PROFILE') {
-    (async () => {
-      if (sender.id !== chrome.runtime.id || !NotmeNetwork.verificationHost(sender.origin || sender.url)) throw new Error('检测站消息来源无效');
-      await verificationReady;
-      return verificationProfile();
-    })().then(value => sendResponse({ value }), error => sendResponse({ error: error.message }));
-    return true;
-  }
   if (NotmeGuard.handles(msg)) {
     NotmeGuard.message(msg, sender).then(value => sendResponse({ value }), error => sendResponse({ error: error.message }));
     return true;
@@ -254,7 +213,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       if (msg.patch && 'refreshMinutes' in msg.patch) await ensureAlarm();
-      await syncVerificationRules();
     }
     // Return a fresh snapshot for any message (covers GET_STATE too).
     const { state, override, settings } = await chrome.storage.local.get(['state', 'override', 'settings']);
@@ -269,7 +227,7 @@ self.notmePrepareEnvironment = async (network, settings, selection, onExit) => {
   let location = null;
   let profile = {};
   if (NotmeEnvironment.needsLocation(selection) && settings.manualTz) {
-    profile = buildManualOverride(settings, Date.now(), null).override;
+    profile = buildManualOverride({ ...settings, guardDefaults: selection }, Date.now(), null).override;
   } else if (NotmeEnvironment.needsLocation(selection) && network.trace && network.status !== 'fail') {
     const stored = await chrome.storage.local.get(['state', 'override']);
     if (stored.state?.status === 'ok' && stored.state.ip === network.trace.ip
@@ -280,10 +238,10 @@ self.notmePrepareEnvironment = async (network, settings, selection, onExit) => {
     if (location) {
       onExit?.({ ...location, provider: location.provider || '缓存的地理查询' });
       const locale = Locale.localeFor(location.countryCode, location.timezone);
-      const pick = stored.state?.status === 'ok' && stored.state.ip === network.trace.ip && stored.override?.lat != null
-        ? stored.override : selection.enabled
-          ? await GeoUtil.chooseResidential(location.lat, location.lon, { radius: 2500, limit: 150, timeoutMs: 12000 })
-          : { lat: location.lat, lon: location.lon };
+      const pick = !selection.enabled ? { lat: null, lon: null }
+        : stored.state?.status === 'ok' && stored.state.ip === network.trace.ip && stored.override?.lat != null
+          ? stored.override
+          : await GeoUtil.chooseResidential(location.lat, location.lon, { radius: 2500, limit: 150, timeoutMs: 800 });
       profile = { lat: pick.lat, lon: pick.lon, timezone: location.timezone,
         locale: locale?.language, languages: locale?.languages, acceptLanguage: locale?.acceptLanguage };
     }

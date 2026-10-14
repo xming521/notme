@@ -54,8 +54,10 @@ HTTP/2 fallback or an absent field does not. Preflight also requests Cloudflare'
 QUIC test host, `cloudflare-quic.com/cdn-cgi/trace`, up to three times sequentially
 within a shared eight-second timeout, allowing Alt-Svc discovery before retries.
 Only a valid trace from that host reporting HTTP/3 is used as the third-party
-exit reference. Its IP and country are compared with the target's HTTPS exit,
-with the source and scope shown in both the exit row and protocol diagnostic.
+exit reference. Its IP and country are compared with the target's HTTPS exit. The Cloudflare
+card always shows its observed IP and actual protocol, including HTTP/2 fallback;
+HTTP/3 verification appears once. The target card keeps the target's own result.
+IP-provider observations still enforce region restrictions without a separate UI row.
 The target trace remains the input for spoofed geolocation. All valid returned
 IPs, including HTTP/2 fallback and earlier retries, participate in the region rule.
 An exit difference is informational and can result from split routing.
@@ -198,7 +200,7 @@ profile. Native hint validation and permission checks run first. Unrelated
 high-entropy fields, such as architecture and platform version, are retained.
 
 Identity masking follows the per-visit choice only on Anthropic origins and
-inherited-origin frames. The exact verification hosts `fuck-claude.vercel.app` and `fuck-claude.app` instead use saved defaults; other sites are not injected.
+inherited-origin frames. The exact verification hosts `fuck-claude.vercel.app` and `fuck-claude.app` also use per-visit choices; other sites are not injected.
 
 DNR rules synchronize `User-Agent`, `Sec-CH-UA`, `Sec-CH-UA-Mobile`,
 `Sec-CH-UA-Platform`, `Sec-CH-UA-Model`, `Sec-CH-UA-Full-Version`, and
@@ -276,14 +278,15 @@ switches can restore any surface to the browser default:
 - **Header.** Per-tab rules modify only requests to the seven protected roots.
   Only explicitly selected language and identity values are applied.
 
-Other sites retain native APIs and headers. On the two exact verification hosts,
-the bridge requests `NOTME_VERIFICATION_PROFILE`, which combines the cached
-environment with `guardDefaults`. Local storage changes update their page profile.
-Dynamic header rules 19000 and 19001 use exact host regexes and are refreshed on
-startup, settings changes and profile refresh; they never match subdomains or
-other Vercel applications. Verification sites open directly and receive profile
-data asynchronously, so scans should start after the environment is loaded.
-Anthropic pages continue to receive only their admitted tab profile.
+Other sites retain native APIs and headers. The two exact verification hosts
+also enter the per-navigation guard. Static rules 3 and 4 use exact host regexes
+so unrelated Vercel applications and subdomains stay native. Their preflight
+sends no request to the verification host: third-party IP observations provide
+a labeled reference for profile preparation, alongside UDP and HTTP/3 diagnostics.
+Their header rule is limited to the approved tab and exact destination host.
+All protected pages receive the admitted tab profile synchronously in the entry
+fragment, including the first inline script. Saved defaults only preselect the
+next visit. Startup removes obsolete dynamic rules 19000 and 19001.
 
 The experimental Web Worker feature is *not* force-enabled on Anthropic
 (claude.ai is worker-heavy and the blob rewrite could break it); the main-thread

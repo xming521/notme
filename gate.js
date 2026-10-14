@@ -11,15 +11,19 @@ const $ = selector => document.querySelector(selector);
 const surfaces = NotmeEnvironment.SURFACES;
 const native = { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, language: navigator.language };
 function selection() {
-  return Object.fromEntries(surfaces.map(({ key }) => [key, $(`input[name="${key}"]:checked`)?.value === 'spoof']));
+  return { ...Object.fromEntries(surfaces.map(({ key }) => [key, $(`input[name="${key}"]:checked`)?.value === 'spoof'])),
+    geoMode: $('input[name="enabled"]:checked')?.value || 'blocked' };
 }
 function setSelection(values) {
-  for (const { key } of surfaces) $(`input[name="${key}"][value="${values[key] ? 'spoof' : 'native'}"]`).checked = true;
+  for (const { key } of surfaces) {
+    const value = key === 'enabled' ? values.geoMode || (values.enabled ? 'spoof' : 'native') : values[key] ? 'spoof' : 'native';
+    $(`input[name="${key}"][value="${value}"]`).checked = true;
+  }
 }
 function showMode() {
   const selected = selection();
-  const allNative = Object.values(selected).every(value => !value);
-  const preset = surfaces.every(({ key }) => selected[key] === defaults[key]);
+  const allNative = surfaces.every(({ key }) => !selected[key]) && selected.geoMode === 'native';
+  const preset = surfaces.every(({ key }) => selected[key] === defaults[key]) && selected.geoMode === defaults.geoMode;
   $('#preset-spoof').setAttribute('aria-pressed', preset);
   $('#preset-native').setAttribute('aria-pressed', allNative);
   $('#mode').textContent = allNative ? '系统默认' : preset ? 'notme 伪装' : '自定义组合';
@@ -49,7 +53,9 @@ function buildChoices() {
     }
     if (note) { const small = document.createElement('small'); small.textContent = note; text.append(small); }
     const group = document.createElement('div'); group.className = 'switch-options';
-    for (const [value, caption] of [['spoof', '伪装'], ['native', '系统默认']]) {
+    const choices = key === 'enabled' ? [['blocked', '不提供位置'], ['spoof', '伪装'], ['native', '系统默认']]
+      : [['spoof', '伪装'], ['native', '系统默认']];
+    for (const [value, caption] of choices) {
       const option = document.createElement('label');
       const input = document.createElement('input'); input.type = 'radio'; input.name = key; input.value = value;
       input.setAttribute('aria-label', `${label}：${caption}`); input.onchange = () => { $('#saved').textContent = ''; check(); };
@@ -73,6 +79,7 @@ function showChoices(profile) {
     workerEnabled: '后台脚本也使用所选时区与语言', webrtcProtect: '禁用本站的 WebRTC 连接',
   };
   for (const { key } of surfaces) $(`#detail-${key}`).textContent = selected[key] ? spoofed[key] : original[key];
+  if (selected.geoMode === 'blocked') $('#detail-enabled').textContent = '拒绝网站定位请求，不查询住宅坐标';
   $('#timezone-setting').hidden = !selected.tzEnabled;
   showMode();
 }
@@ -102,6 +109,94 @@ function showInfo(snapshot, exitSource) {
     return [term, detail];
   }));
 }
+function countryName(code) {
+  if (!code) return '地区未确认';
+  code = code.toUpperCase();
+  if (code === 'CN') return '中国大陆 · CN';
+  if (code === 'HK') return '香港 · HK';
+  return `${new Intl.DisplayNames('zh-CN', { type: 'region' }).of(code.toUpperCase())} · ${code.toUpperCase()}`;
+}
+function networkCard(id, title, source, status, badge, exits, fields = [], note = '', empty = '未取得出口 IP') {
+  const card = document.createElement('article'); card.id = id; card.className = 'check network-card ' + status;
+  const heading = document.createElement('div'); heading.className = 'card-heading';
+  const label = document.createElement('b'); label.textContent = title;
+  const state = document.createElement('span'); state.className = 'status-badge'; state.textContent = badge;
+  heading.append(label, state);
+  const origin = document.createElement('p'); origin.className = 'card-source'; origin.textContent = source;
+  card.append(heading, origin);
+  const unique = [...new Map(exits.map(exit => [`${exit.ip}/${exit.country}/${exit.protocol}`, exit])).values()];
+  if (!unique.length) {
+    const placeholder = document.createElement('p'); placeholder.className = 'exit-placeholder'; placeholder.textContent = empty; card.append(placeholder);
+  }
+  for (const exit of unique) {
+    const row = document.createElement('div'); row.className = 'endpoint';
+    const ip = document.createElement('strong'); ip.className = 'exit-ip'; ip.textContent = exit.ip;
+    const region = document.createElement('span'); region.className = 'endpoint-meta'; region.textContent = countryName(exit.country);
+    const protocol = document.createElement('span'); protocol.className = 'protocol'; protocol.textContent = exit.protocol?.toUpperCase() || '协议未知';
+    row.append(ip, region, protocol); card.append(row);
+  }
+  if (fields.length) {
+    const facts = document.createElement('dl'); facts.className = 'network-fields';
+    for (const [name, value] of fields) {
+      const field = document.createElement('div'); const term = document.createElement('dt'); term.textContent = name;
+      const fact = document.createElement('dd'); fact.textContent = value; field.append(term, fact); facts.append(field);
+    }
+    card.append(facts);
+  }
+  if (note) { const detail = document.createElement('p'); detail.className = 'card-note'; detail.textContent = note; card.append(detail); }
+  return card;
+}
+function renderNetwork(view) {
+  const report = view.report || {};
+  const probes = report.probes || [];
+  const reachable = probes.filter(probe => probe.reachable);
+  const average = reachable.length ? Math.round(reachable.reduce((sum, probe) => sum + probe.durationMs, 0) / reachable.length) : null;
+  const connection = report.checks?.find(check => check.name === 'HTTP 连通性');
+  const targetExits = probes.flatMap(probe => probe.trace ? [probe.trace] : []);
+  const host = new URL(view.target).hostname;
+  const targetStatus = report.traceSource ? 'info' : report.networkStatus === 'fail' ? 'fail' : connection?.status || 'info';
+  const target = networkCard('target-network', report.traceSource ? '检测站连接' : '目标站出口', host, targetStatus,
+    report.traceSource ? '待确认' : targetStatus === 'fail' ? '连接失败' : targetStatus === 'warn' ? '连接提示' : report.trace ? '已获取' : '未验证',
+    targetExits, probes.length ? [['平均延迟', average === null ? '—' : average + ' ms'], ['响应', `${reachable.length}/${probes.length}`],
+      ['HTTP 状态', [...new Set(reachable.map(probe => probe.status))].join(' / ') || '—']] : [],
+    report.traceSource ? '确认前不请求检测站，环境通过第三方网络检查准备。' : connection?.blocking ? connection.detail : '',
+    report.traceSource ? '确认后连接' : '未取得出口 IP');
+  const thirdParty = report.thirdPartyHTTP3 || {};
+  const cloudflareTrace = thirdParty.trace;
+  const cloudflareCheck = report.checks?.find(check => check.name === 'HTTP/3 / QUIC（第三方参考）');
+  const matches = cloudflareTrace && report.trace && cloudflareTrace.ip === report.trace.ip && cloudflareTrace.country === report.trace.country;
+  const comparison = cloudflareTrace && report.trace ? `与${report.traceSource ? '参考' : '目标站'}出口${matches ? '相同' : '不同'}` : '';
+  const cloudflare = networkCard('cloudflare-network', '测试站出口', thirdParty.host, cloudflareCheck?.status || 'info',
+    cloudflareTrace?.protocol === 'http/3' ? 'HTTP/3 已验证' : 'HTTP/3 未验证',
+    cloudflareTrace ? [cloudflareTrace] : [], [], comparison || thirdParty.error || '');
+  const udp = report.udp || {};
+  const udpCheck = report.checks?.find(check => check.name === 'UDP / STUN');
+  const protectedUDP = udp.state === 'restricted' && udp.policy === 'disable_non_proxied_udp';
+  const udpExits = udp.state === 'available' ? (udp.ips || []).map(ip => ({ ip,
+    country: udp.regions?.find(region => NotmeUDP.normalizeIP(region.ip) === NotmeUDP.normalizeIP(ip))?.countryCode, protocol: 'UDP' })) : [];
+  const udpMatches = report.trace && udpExits.length && udpExits.every(exit => NotmeUDP.normalizeIP(exit.ip) === NotmeUDP.normalizeIP(report.trace.ip));
+  const stun = networkCard('udp-network', 'UDP / STUN', 'stun.cloudflare.com:3478', udpCheck?.status || 'info',
+    protectedUDP ? '已保护' : udpExits.length ? '收到响应' : '未验证', udpExits, [],
+    protectedUDP ? '浏览器已限制非代理 UDP，未发送 STUN。' : udpExits.length && report.trace
+      ? `与${report.traceSource ? '参考' : '目标站'}出口${udpMatches ? '相同' : '不同'}` : '未取得 STUN 响应。',
+    protectedUDP ? 'WebRTC 防泄漏保护已生效' : 'UDP 出口未验证');
+  const policy = document.createElement('div'); policy.id = 'network-policy';
+  const unknown = [...new Set((report.exits || []).filter(exit => !exit.country).map(exit => exit.ip))].length;
+  const noExits = !report.exits?.length;
+  policy.className = 'policy-status ' + (report.regionBlocked ? 'fail' : unknown || noExits ? 'info' : 'ok');
+  const title = document.createElement('b'); title.textContent = report.regionBlocked ? '检测到中国大陆 / 香港出口，禁止访问'
+    : noExits ? '尚未确认出口地区' : unknown ? '未发现受限出口，部分地区尚未确认' : '未发现中国大陆 / 香港出口';
+  policy.append(title);
+  if (report.regionBlocked) {
+    const blocked = document.createElement('p'); blocked.textContent = report.checks?.find(check => check.name === '出口地区检查')?.detail;
+    policy.append(blocked);
+  }
+  $('#checks').replaceChildren(target, cloudflare, stun, policy);
+  const failed = report.regionBlocked || report.networkStatus === 'fail';
+  $('#network-status').textContent = failed ? '未通过'
+    : report.networkStatus === 'warn' ? '连接有提示' : '检查完成';
+  $('#network-status').className = 'status-badge ' + (failed ? 'fail' : report.networkStatus === 'warn' ? 'warn' : 'ok');
+}
 function render(view) {
   navigationId = view.navigationId;
   $('#target').textContent = view.target;
@@ -113,23 +208,18 @@ function render(view) {
       overrideAddress: view.override?.enabled && view.override.lat === globalSnapshot.override?.lat
         ? globalSnapshot.state?.overrideAddress : null },
     override: view.override?.enabled ? view.override : null,
-  }, `目标站 ${new URL(view.target).hostname} 的 HTTPS 请求出口`);
-  $('#checks').replaceChildren(...(view.report?.checks || []).map(check => {
-    const row = document.createElement('div'); row.className = 'check ' + check.status;
-    const icon = document.createElement('span'); icon.textContent = check.status === 'ok' ? '✓' : check.status === 'warn' ? '!' : check.status === 'info' ? 'i' : '×';
-    const text = document.createElement('div');
-    const label = document.createElement('b'); label.textContent = check.name;
-    const detail = document.createElement('p'); detail.textContent = check.detail;
-    text.append(label, detail); row.append(icon, text); return row;
+  }, view.report?.traceSource || `目标站 ${new URL(view.target).hostname} 的 HTTPS 请求出口`);
+  renderNetwork(view);
+  $('#environment-errors').replaceChildren(...(view.report?.environmentChecks || []).filter(check => check.status === 'fail').map(check => {
+    const error = document.createElement('p'); error.textContent = check.detail; return error;
   }));
   const ready = Boolean(view.report?.ready);
   const warnings = view.report?.checks.some(check => check.status === 'warn');
   $('#confirm').disabled = !ready;
   $('#summary').textContent = ready ? warnings
-    ? '可以访问；网络诊断有提示，请展开详情核对。' : '检查通过。确认后即可访问。'
-    : '检查未通过，暂时不能访问。请查看下方原因后重试。';
-  $('#check-summary').textContent = `${ready ? warnings ? '网络诊断有提示' : '网络检查通过' : '网络检查未通过'} · HTTPS / UDP / HTTP/3`;
-  if (!ready || warnings) $('#diagnostics').open = true;
+    ? '可以访问，网络有提示，请核对上方结果。' : '环境已就绪，点击“确认并访问”进入网站。'
+    : '暂时无法访问，请核对网络结果和所选环境。';
+  $('#diagnostics').open = true;
 }
 function renderSettings(snapshot) {
   showChoices(snapshot.override); showInfo(snapshot);
@@ -142,6 +232,16 @@ async function check() {
   const current = ++revision;
   busy = true; $('#confirm').disabled = true; $('#retry').disabled = true; $('#error').textContent = '';
   showChoices(); $('#summary').textContent = settingsOnly ? '正在读取环境…' : '正在检查网络与所选环境…';
+  if (!settingsOnly) {
+    $('#network-status').textContent = '正在检查'; $('#network-status').className = 'status-badge info';
+    $('#network-elapsed').textContent = '';
+    $('#checks').replaceChildren(); $('#environment-errors').replaceChildren();
+  }
+  const started = performance.now();
+  let stage = settingsOnly ? '正在读取环境' : '正在检查 HTTPS、HTTP/3 和出口地区';
+  const timer = setInterval(() => {
+    if (current === revision) $('#summary').textContent = `${stage}… 已用 ${((performance.now() - started) / 1000).toFixed(1)} 秒`;
+  }, 500);
   const chosen = selection();
   try {
     await preferencesTask;
@@ -156,11 +256,15 @@ async function check() {
       send('CHECK', { selection: chosen }), NotmeUDP.probe({ policy: policy.value }),
     ]);
     if (current !== revision) return;
+    stage = '正在核实 UDP 出口地区';
     const updated = await send('UDP', { navigationId: view.navigationId, checkId: view.report.id, selection: chosen, udp });
-    if (current === revision) render(updated);
+    if (current === revision) {
+      render(updated);
+      $('#network-elapsed').textContent = `用时 ${((performance.now() - started) / 1000).toFixed(1)} 秒`;
+    }
   }
   catch (error) { if (current === revision) $('#error').textContent = error.message; }
-  finally { if (current === revision) { busy = false; $('#retry').disabled = false; } }
+  finally { clearInterval(timer); if (current === revision) { busy = false; $('#retry').disabled = false; } }
 }
 async function updatePreference(patch, refresh = false) {
   ++revision; $('#confirm').disabled = true; $('#retry').disabled = true; $('#error').textContent = '';
@@ -231,7 +335,7 @@ $('#close').onclick = () => chrome.tabs.remove(tabId);
   if (settingsOnly) {
     $('#heading').textContent = '设置默认环境。'; $('#eyebrow').textContent = '与访问前的环境选择使用同一页面';
     $('#confirm').hidden = true; $('#diagnostics').hidden = true; $('#retry').textContent = '刷新环境';
-    $('#scope').textContent = '保存后仅用于下一次 Anthropic / Claude 访问，其他网站保持系统默认。';
+    $('#scope').textContent = '保存为默认只用于 Anthropic / Claude 和两个检测站下次访问的预选；每次访问都可重新选择并确认。';
   } else $('#target').textContent = view.target;
   await check();
 })().catch(error => { $('#error').textContent = error.message; });

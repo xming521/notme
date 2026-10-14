@@ -129,7 +129,7 @@ async function main() {
   });
   await test('upgrade removes legacy global rules and privacy control without deleting other rules', async () => {
     const stored={},listener={addListener(){}};
-    const rules=new Map([9001,9002,9003,9004,9005,501].map(id=>[id,{id}]));
+    const rules=new Map([9001,9002,9003,9004,9005,19000,19001,501].map(id=>[id,{id}]));
     const session={guardWebRTCProtect:true};let controlled=true;
     const ctx=vm.createContext({
       navigator:{userAgent:'Chrome/140.0.0.0 QQBrowser/20',platform:'Win32'},importScripts(){},
@@ -142,13 +142,8 @@ async function main() {
     });
     ctx.self=ctx;
     for(const file of ['lib/network.js','lib/environment.js','lib/identity.js','background.js'])vm.runInContext(read(file),ctx);
-    await vm.runInContext('verificationReady',ctx);
-    assert.deepEqual([...rules.keys()],[501,19000,19001]);
-    for(const [index,host] of require('../lib/network.js').VERIFICATION_DOMAINS.entries()){
-      const filter=new RegExp(rules.get(19000+index).condition.regexFilter);
-      assert(filter.test('https://'+host+'/'));
-      assert(!filter.test('https://sub.'+host+'/'));assert(!filter.test('https://'+host+'.evil.test/'));
-    }assert.equal(controlled,false);
+    await vm.runInContext('legacyCleanup',ctx);
+    assert.deepEqual([...rules.keys()],[501]);assert.equal(controlled,false);
     assert.equal(session.guardWebRTCProtect,undefined);
     assert(!stored.identityProfile.userAgent.includes('QQBrowser'));
   });

@@ -2,11 +2,13 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>notme · 环境选择与设置</title><link rel="stylesheet" href="gate.css"></head>
 <body><main>
   <header><img src="icons/icon48.png" alt=""><b>notme</b><span>环境选择与设置</span></header>
-  <p id="eyebrow" class="eyebrow">Anthropic / Claude 访问前检查</p><h1 id="heading">选择这次访问的环境。</h1>
+  <p id="eyebrow" class="eyebrow">访问前环境检查</p><h1 id="heading">选择这次访问的环境。</h1>
   <p id="summary" class="banner" role="status">正式网页请求已拦截，请选择环境。</p><p id="target" class="target"></p>
+  <details id="diagnostics" open><summary id="check-summary">网络检查 <span id="network-status">正在检查</span><span id="network-elapsed"></span></summary><section id="checks" aria-live="polite"></section><p class="network-note">Cloudflare 和 UDP 使用第三方测试路径。出口不同可能由分流产生。</p></details>
+  <h2 id="environment-heading">本次访问环境</h2>
   <div class="presets"><button id="preset-spoof" class="secondary" disabled>使用 notme 伪装</button><button id="preset-native" class="secondary" disabled>全部使用系统默认</button><span id="mode"></span></div>
   <section id="choices" aria-label="环境选择"></section>
-  <details id="diagnostics"><summary id="check-summary">网络检查详情 · HTTPS / UDP / HTTP/3</summary><section id="checks" aria-live="polite"></section></details>
+  <div id="environment-errors" role="alert"></div>
   <details id="advanced"><summary>高级设置 <span>通常无需调整</span></summary>
     <div class="preferences">
       <label for="networkWarnMs">延迟警告阈值 <span>毫秒</span></label><input id="networkWarnMs" type="number" min="1" max="60000" step="1">
@@ -19,5 +21,5 @@
   </details>
   <p id="error" role="alert"></p><p id="saved" role="status"></p>
   <div class="actions"><button id="confirm" disabled>确认并访问</button><button id="retry" class="secondary" disabled>重新检查</button><button id="save-defaults" class="secondary" disabled>保存为默认</button><button id="close" class="secondary">关闭标签页</button></div>
-  <footer id="scope">仅对 Anthropic / Claude 网站生效，其他网站保持系统默认。保存为默认只记住下次访问的选择；每次打开或刷新仍需检查并确认。</footer>
+  <footer id="scope">用于 Anthropic / Claude 和两个 Fuck Claude 检测站。每次打开或刷新都先选择本次环境，再确认访问；保存为默认只用于下次预选。</footer>
 </main><script src="lib/environment.js"></script><script src="lib/tzdata.js"></script><script src="lib/udp.js"></script><script src="gate.js"></script></body></html>

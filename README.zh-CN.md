@@ -12,9 +12,9 @@ notme 是一个 Chrome Manifest V3 扩展，适合使用代理、VPN、远程桌
 
 每次打开或刷新 Anthropic 网址，先进入本地环境选择页。可以选择 **使用 notme 伪装**、**全部使用系统默认**，也可以逐项自定义。静态规则提前拦截正式 HTML 和子资源；检查全部通过后，还需要你点击 **确认并访问**。以前访问过、其他标签页已放行，都不能代替这次确认。
 
-工具栏图标和访问前检查现在打开同一个中文页面：七项环境开关与时区选择在一起，网络详情和高级设置默认收起，失败原因自动展开。时区、延迟阈值、定位精度、刷新间隔和可选 Token 修改后自动保存，并重新检查；点击 **保存为默认** 可记住当前七项选择，用于下一次 Anthropic / Claude 访问和指定检测站。保存配置不会代替访问确认。延迟警告阈值默认 1500 ms；升级时仅将旧默认值 500 ms 迁移一次，其他已保存的阈值保留。
+工具栏图标和访问前检查现在打开同一个中文页面：七项环境开关与时区选择在一起，网络检查置顶，目标站、Cloudflare 测试站和 UDP 分成三张卡片，出口 IP、地区、实际协议与延迟清楚分行显示；正文使用 18 px 中文无衬线字体，高级设置默认收起。HTTP/2 回退也显示 Cloudflare 测试站看到的出口 IP 与地区，HTTP/3 状态只显示一次。查 IP 服务继续参与地区检查，不再单独占一行。时区、延迟阈值、定位精度、刷新间隔和可选 Token 修改后自动保存，并重新检查；点击 **保存为默认** 可记住当前七项选择，用于下一次 Anthropic / Claude 访问和指定检测站。保存配置不会代替访问确认。延迟警告阈值默认 1500 ms；升级时仅将旧默认值 500 ms 迁移一次，其他已保存的阈值保留。
 
-覆盖 `anthropic.com`、`claude.ai`、`claude.com`、`claude.app`、`claudeusercontent.com`、`claudemcpcontent.com`、`claude.site` 及它们的所有子域。`fuck-claude.vercel.app` 与 `fuck-claude.app` 也使用环境页 **保存为默认** 的配置，七项开关独立生效。检测站直接打开，不进入 Anthropic 访问闸门；等待缓存环境加载完成后开始扫描。只匹配这两个完整域名，其他网站和 Vercel 应用保持原生环境。
+覆盖 `anthropic.com`、`claude.ai`、`claude.com`、`claude.app`、`claudeusercontent.com`、`claudemcpcontent.com`、`claude.site` 及它们的所有子域。`fuck-claude.vercel.app` 与 `fuck-claude.app` 每次打开或刷新也先选择本次环境，再确认进入，七项开关独立生效，无需先保存默认配置。确认前不会请求这两个检测站，使用第三方查 IP、UDP 与 HTTP/3 诊断准备环境，并标清参考出口来源，不冒充检测站的实际出口。只匹配这两个完整域名，其他网站和 Vercel 应用保持原生环境。
 
 每次检查向实际目标域名的 `/cdn-cgi/trace` 发起三次不带 Cookie 的 HTTPS 请求，并检查第三方测试站、查 IP 服务和允许执行的 STUN 探测。**地区限制只有中国大陆（`CN`）与香港（`HK`）：任何来源、任何一次有效检测发现这两个地区的 IP 都禁止访问。** 出口 IP 不同可能由分流产生，只作信息说明，不判定异常；地区未知显示未确认，不冒充已验证。纯延迟警告不会阻止访问。自动伪装仍需要目标 IP 的可用地理数据，系统默认无需伪装数据。点击确认时再次检查所有来源，发现限制地区仍会拦截；换成其他地区的出口会更新本次环境，设置改变或超过一分钟则需重新检查。
 
@@ -98,7 +98,7 @@ flowchart LR
 | **整个 `Date` 本地时间面** | 只有 `getTimezoneOffset` 被改，`getHours`/`toString`/`toLocaleString` 等仍暴露本机时区 | `getTimezoneOffset` **以及** 所有本地 getter/setter、`toString`/`toDateString`/`toTimeString`、`toLocale*`、数字构造函数、无偏移量字符串解析、`Date()` 函数调用，全部按出口 IP 时区（含 DST）计算 |
 | Intl 时区 | 本机系统时区 | 出口 IP 对应时区（即使传入 locale 也注入） |
 | navigator 语言 | 本机语言 | 根据国家码 + 时区推断 |
-| 浏览器 / 设备品牌 | UA、UA-CH 中的国产浏览器标识和设备型号 | 显示普通 Chrome/Chromium 品牌，隐藏设备型号，并同步 `User-Agent` 与相关 Client Hints 请求头；按本次 Anthropic / Claude 访问的选择及两个检测站保存的默认配置生效 |
+| 浏览器 / 设备品牌 | UA、UA-CH 中的国产浏览器标识和设备型号 | 显示普通 Chrome/Chromium 品牌，隐藏设备型号，并同步 `User-Agent` 与相关 Client Hints 请求头；按本次 Anthropic / Claude 或检测站访问的选择生效 |
 | Intl 默认 locale | 本机 locale | `DateTimeFormat`/`NumberFormat`/`Collator`/`RelativeTimeFormat`/`PluralRules`/`ListFormat`/`DisplayNames`/`Segmenter`/`DurationFormat` + `Number`/`Array`/`BigInt.toLocaleString` 全部一致 |
 | Accept-Language | 本机请求头语言，且仅主/子框架和 XHR 生效 | 修改已确认的 Anthropic 目标及两个检测站请求，覆盖**所有**资源类型（图片/字体/脚本/beacon 等） |
 | WebRTC IP | 可能绕过代理泄露真实 IP | 仅在目标网站禁用 WebRTC 连接，其他网站保持默认；会影响本站依赖 WebRTC 的音视频功能 |
@@ -206,7 +206,7 @@ Edge 支持 notme 用到的所有 `chrome.*` API（`declarativeNetRequest`、`al
 
 ## 验证效果
 
-在已确认的 Anthropic 页面控制台检查这些值；上述两个检测站按保存的默认配置伪装，其他检测站显示系统原生环境：
+在已确认的 Anthropic 页面控制台检查这些值；上述两个检测站按本次确认的配置伪装，其他检测站显示系统原生环境：
 
 ```js
 navigator.language
@@ -226,10 +226,12 @@ navigator.geolocation.getCurrentPosition(console.log, console.error)
 
 ## 设置项
 
+地理位置默认 **不提供位置**：拒绝网页定位请求，不查询住宅街道或反向地址。需要定位时可手动选择 **伪装** 或 **系统默认**。IP 地区服务改为并行查询，每组最多等待四秒（包括响应正文），期间发现的限制地区结果都会保留。检查页显示当前阶段和累计耗时。
+
 - **Location spoof**：启用/关闭地理位置伪装。
 - **Timezone spoof**：启用/关闭 `Date` 和 `Intl` 时区伪装。
 - **Language spoof**：启用/关闭 `navigator.language(s)`、Intl locale、`Accept-Language`。
-- **浏览器与设备标识**：按本次 Anthropic / Claude 访问选择或检测站保存的默认配置，伪装 UA、UA-CH、设备型号和对应请求头。
+- **浏览器与设备标识**：按本次 Anthropic / Claude 或检测站访问的选择，伪装 UA、UA-CH、设备型号和对应请求头。
 - **IP 防泄漏（WebRTC）**：仅在本站禁用 WebRTC 连接，默认开启；选择系统默认可使用原生 WebRTC。会影响本站依赖 WebRTC 的音视频功能，其他网站不受影响。
 - **Hide CJK fonts**：把暴露操作系统/地区的中文字体(微软雅黑、苹方、宋体、黑体…简繁都含)从 canvas `measureText` 和 DOM 宽度探测里剥掉，让它们读起来像"未安装"。默认开启。
 - **Spoof in Web Workers（实验性）**：把时区/语言伪装扩展到专用 Web Worker(指纹站常在 worker 里读真实时区来绕过主线程伪装)。**默认关闭** —— 它通过 blob 垫片重新加载 worker 代码,可能破坏依赖 `self.location` 的 WASM/打包 worker。它会探测 CSP 是否允许 `blob:`,被拦时回退到原生 worker(不会静默弄坏 worker),但请仅在你确实需要 worker 级时区隐藏时开启;某站点 worker 出问题就关掉它。
