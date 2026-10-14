@@ -258,6 +258,29 @@ function renderSettings(snapshot) {
     ? '选择默认环境，点击“保存为默认”生效。打开目标网站时仍会检查并确认。'
     : '自动检测尚未成功，可以刷新环境或选择手动时区。';
 }
+let progressTimer;
+let progressRun = 0;
+function startProgress() {
+  clearInterval(progressTimer);
+  const run = ++progressRun, started = performance.now();
+  const box = $('#check-progress'), track = $('#progress-track');
+  box.hidden = false; box.dataset.running = 'true'; box.dataset.warning = 'false';
+  track.removeAttribute('aria-valuenow');
+  const elapsed = () => { $('#progress-time').textContent = ((performance.now() - started) / 1000).toFixed(1) + ' 秒'; };
+  elapsed(); progressTimer = setInterval(elapsed, 100);
+  const step = (index, label) => {
+    if (run !== progressRun) return;
+    $('#progress-label').textContent = label; track.setAttribute('aria-valuetext', label);
+    $('#progress-fill').style.width = [12, 45, 78, 100][index] + '%';
+    document.querySelectorAll('.progress-steps li').forEach((item, i) => { item.className = i < index ? 'done' : i === index ? 'active' : ''; });
+  };
+  step(0, '正在准备环境');
+  return { step, finish(label, warning = false) {
+    if (run !== progressRun) return;
+    clearInterval(progressTimer); elapsed(); step(3, label);
+    box.dataset.running = 'false'; box.dataset.warning = String(warning);
+  } };
+}
 async function check() {
   const current = ++revision;
   $('#exit-alert').hidden = true;
@@ -269,35 +292,35 @@ async function check() {
     $('#checks').replaceChildren(); $('#environment-errors').replaceChildren();
   }
   const started = performance.now();
-  let stage = settingsOnly ? '正在读取环境' : '正在检查 HTTPS、HTTP/3 和出口地区';
-  const timer = setInterval(() => {
-    if (current === revision) $('#summary').textContent = `${stage}… 已用 ${((performance.now() - started) / 1000).toFixed(1)} 秒`;
-  }, 500);
+  const progress = startProgress();
   const chosen = selection();
   try {
     await preferencesTask;
     if (current !== revision) return;
     if (settingsOnly) {
       const snapshot = await api({ type: 'GET_STATE' });
-      if (current === revision) renderSettings(snapshot);
+      if (current === revision) { renderSettings(snapshot); progress.finish('环境已读取'); }
       return;
     }
     const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
+    progress.step(1, '正在检测 HTTPS、HTTP/3 与 UDP');
     const [view, udp] = await Promise.all([
       send('CHECK', { selection: chosen }), NotmeUDP.probe({ policy: policy.value }),
     ]);
     if (current !== revision) return;
-    stage = '正在核实 UDP 出口地区';
+    progress.step(2, '正在核实出口地区');
     const updated = await send('UDP', { navigationId: view.navigationId, checkId: view.report.id, selection: chosen, udp });
     if (current === revision) {
       render(updated);
+      progress.finish(updated.report.ready ? '检查完成，可以确认访问' : '检查完成，请查看提示', !updated.report.ready);
       $('#network-elapsed').textContent = `用时 ${((performance.now() - started) / 1000).toFixed(1)} 秒`;
     }
   }
-  catch (error) { if (current === revision) $('#error').textContent = error.message; }
-  finally { clearInterval(timer); if (current === revision) { busy = false; $('#retry').disabled = false; } }
+  catch (error) { if (current === revision) { $('#error').textContent = error.message; progress.finish('检查未完成，请重试', true); } }
+  finally { if (current === revision) { busy = false; $('#retry').disabled = false; } }
 }
 async function updatePreference(patch, refresh = false) {
+  clearInterval(progressTimer); ++progressRun; $('#check-progress').hidden = true;
   ++revision; $('#confirm').disabled = true; $('#retry').disabled = true; $('#error').textContent = '';
   preferencesTask = preferencesTask.then(async () => {
     const snapshot = await api({ type: 'SET_SETTINGS', patch }); settings = snapshot.settings; globalSnapshot = snapshot;
@@ -336,6 +359,7 @@ $('#save-defaults').onclick = async () => {
 $('#confirm').onclick = async () => {
   if (busy || settingsOnly) return;
   busy = true; $('#confirm').disabled = true; $('#confirm').textContent = '正在进入…';
+  let progress;
   const controls = document.querySelectorAll('#choices input, #choices select, #advanced input, .presets button, #save-defaults, #retry');
   for (const input of controls) input.disabled = true;
   try {
@@ -343,19 +367,23 @@ $('#confirm').onclick = async () => {
     let destination = await send('CONFIRM', { navigationId, selection: chosen });
     if (destination?.recheck) {
       $('#confirm').textContent = '正在复查…';
+      progress = startProgress(); progress.step(1, '正在重新检测网络');
       const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
       const [token, udp] = await Promise.all([
         send('PREPARE_CONFIRM', { navigationId, selection: chosen }),
         NotmeUDP.probe({ policy: policy.value }),
       ]);
       $('#confirm').textContent = '正在确认出口…';
+      progress.step(2, '正在核实出口地区');
       destination = await send('CONFIRM', { navigationId, selection: chosen, udp, token });
     }
+    progress?.finish('检查完成，正在进入');
     location.replace(destination);
   }
   catch (error) {
     const view = await send('STATE');
     if (view?.report) render(view);
+    progress?.finish('暂时无法进入，请查看提示', true);
     $('#error').textContent = error.message; busy = false; $('#confirm').textContent = '确认并访问';
     for (const input of controls) input.disabled = false;
   }

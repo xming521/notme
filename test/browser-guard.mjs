@@ -246,6 +246,8 @@ try {
   await page.waitForTimeout(200);
   assert.equal(formalRequests().length, 0);
   pass('检查通过后仍等待明确确认，正式 HTML / 脚本 / 资源请求数为零');
+  assert.equal(await page.locator('#check-progress').getAttribute('data-running'),'false');
+  assert.match(await page.locator('#progress-label').textContent(),/检查完成/);
   traffic.length=0;const udpBeforeQuickConfirm=udpRequests;
   await confirm(page);
   assert.equal(traffic.some(item=>item.path==='/cdn-cgi/trace'),false);
@@ -277,6 +279,8 @@ try {
   await wait(async()=>traffic.some(item=>item.host==='claude.ai'&&item.path==='/cdn-cgi/trace'));
   assert.equal(formalRequests().length,0);
   assert.equal(await parallelConfirm.locator('#confirm').textContent(),'正在复查…');
+  assert.equal(await parallelConfirm.locator('#check-progress').getAttribute('data-running'),'true');
+  assert.equal(await parallelConfirm.locator('#progress-track').getAttribute('aria-valuenow'),null);
   await wait(async()=>await parallelConfirm.evaluate(()=>typeof window.releaseUDP==='function'));
   await parallelConfirm.evaluate(()=>window.releaseUDP());
   await parallelConfirm.locator('#formal').waitFor();await parallelConfirm.close();

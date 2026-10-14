@@ -4,6 +4,7 @@
   <header><img src="icons/icon48.png" alt=""><b>notme</b><span>环境选择与设置</span></header>
   <p id="eyebrow" class="eyebrow">访问前环境检查</p><h1 id="heading">选择这次访问的环境。</h1>
   <p id="summary" class="banner" role="status">正式网页请求已拦截，请选择环境。</p><p id="target" class="target"></p>
+  <div id="check-progress" hidden><div class="progress-heading"><span id="progress-label" role="status"></span><span id="progress-time"></span></div><div id="progress-track" role="progressbar" aria-label="环境检查进度"><div id="progress-fill"></div></div><ol class="progress-steps"><li>准备环境</li><li>网络检测</li><li>出口核验</li></ol></div>
   <aside id="exit-alert" role="alert" hidden><strong>⚠ 出口 IP 已变化</strong><p id="exit-alert-host"></p><div><span>上次 IP</span><b id="exit-alert-before"></b></div><div><span>本次 IP</span><b id="exit-alert-after"></b></div><p>请确认代理线路是否符合预期，再继续访问。</p></aside>
   <details id="diagnostics" open><summary id="check-summary">网络检查 <span id="network-status">正在检查</span><span id="network-elapsed"></span></summary><section id="checks" aria-live="polite"></section><p class="network-note">检查完成后 15 秒内确认直接进入；超时自动复查。切换代理后请重新检查。Cloudflare 和 UDP 为第三方测试路径。</p></details>
   <h2 id="environment-heading">本次访问环境</h2>

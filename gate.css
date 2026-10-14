@@ -117,3 +117,22 @@ footer { color: var(--muted); font-size: 16px; border-top: 1px solid var(--line)
 #exit-alert p { margin: 6px 0; }
 #exit-alert div { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 7px 0; }
 #exit-alert b { font: 600 20px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; min-width: 0; }
+
+#check-progress { margin: 0 0 20px; padding: 18px 22px; background: linear-gradient(120deg, #edf8f2, #f4f8fc); border: 1px solid #d3e8dd; border-radius: 14px; }
+.progress-heading { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 12px; }
+#progress-label { color: #245f48; font-weight: 600; }
+#progress-time { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#progress-track { height: 8px; border-radius: 999px; background: #dce9e2; overflow: hidden; }
+#progress-fill { position: relative; height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, #23865e, #55b59e); transition: width .35s ease; }
+#check-progress[data-running=true] #progress-fill::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, #ffffff80, transparent); animation: progress-flow 1.6s ease-in-out infinite; }
+.progress-steps { display: flex; justify-content: space-between; gap: 10px; list-style: none; padding: 0; margin: 12px 0 0; color: var(--muted); font-size: 14px; }
+.progress-steps li::before { content: '○'; margin-right: 6px; }
+.progress-steps li.done { color: #247657; }
+.progress-steps li.done::before { content: '✓'; }
+.progress-steps li.active { color: #1b6248; font-weight: 600; }
+.progress-steps li.active::before { content: '●'; }
+#check-progress[data-warning=true] { background: #fff7e8; border-color: #e5cc9c; }
+#check-progress[data-warning=true] #progress-label { color: #805000; }
+#check-progress[data-warning=true] #progress-fill { background: #bd861f; }
+@keyframes progress-flow { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { #progress-fill { transition: none; } #check-progress[data-running=true] #progress-fill::after { animation: none; } }
