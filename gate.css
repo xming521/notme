@@ -136,3 +136,13 @@ footer { color: var(--muted); font-size: 16px; border-top: 1px solid var(--line)
 #check-progress[data-warning=true] #progress-fill { background: #bd861f; }
 @keyframes progress-flow { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 @media (prefers-reduced-motion: reduce) { #progress-fill { transition: none; } #check-progress[data-running=true] #progress-fill::after { animation: none; } }
+
+/* Keep the full settings page out of the initial paint during approved navigation. */
+#environment-loading { display: none; }
+body.loading-environment { background: #f8faf9; min-height: 100vh; }
+body.loading-environment > main { display: none; }
+body.loading-environment #environment-loading { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(247, 250, 249, .64); }
+.loading-glass { display: flex; align-items: center; gap: 12px; padding: 16px 22px; margin: 24px; border: 1px solid rgba(214, 226, 220, .55); border-radius: 18px; background: rgba(255, 255, 255, .62); backdrop-filter: blur(12px); box-shadow: 0 6px 28px rgba(43, 77, 61, .04); color: #607369; font-size: 15px; }
+.loading-orbit { width: 18px; height: 18px; flex: 0 0 18px; border: 2px solid #dfebe4; border-top-color: #7fa58f; border-radius: 50%; animation: environment-spin 1s linear infinite; }
+@keyframes environment-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .loading-orbit { animation: none; } }

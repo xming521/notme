@@ -381,6 +381,8 @@ $('#confirm').onclick = async () => {
       destination = await send('CONFIRM', { navigationId, selection: chosen, udp, token });
     }
     progress?.finish('检查完成，正在进入');
+    $('#loading-label').textContent = '正在应用已确认的环境…';
+    document.body.classList.add('loading-environment');
     location.replace(destination);
   }
   catch (error) {
@@ -402,7 +404,7 @@ $('#close').onclick = () => chrome.tabs.remove(tabId);
     if (!view) throw new Error('原访问地址未保存，无法恢复。请从浏览器历史记录重新打开原页面。');
     if (view.phase === 'checking') {
       const destination = await send('REUSE');
-      if (destination) { location.replace(destination); return; }
+      if (destination) { $('#loading-label').textContent = '正在应用已确认的环境…'; location.replace(destination); return; }
     }
     settingsOnly = view.phase !== 'checking';
   }
@@ -416,5 +418,6 @@ $('#close').onclick = () => chrome.tabs.remove(tabId);
     $('#confirm').hidden = true; $('#diagnostics').hidden = true; $('#retry').textContent = '刷新环境';
     $('#scope').textContent = '保存为默认只用于 Anthropic / Claude 和两个检测站下次访问的预选；每次访问都可重新选择并确认。';
   } else $('#target').textContent = view.target;
+  document.body.classList.remove('loading-environment');
   await check();
-})().catch(error => { $('#error').textContent = error.message; });
+})().catch(error => { document.body.classList.remove('loading-environment'); $('#error').textContent = error.message; });

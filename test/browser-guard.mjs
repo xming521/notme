@@ -438,7 +438,18 @@ try {
   pass('检测站进入前发现大陆出口时禁止确认，系统默认不能绕过，正式页面保持零请求');
 
   traffic.length = 0;
-  await page.reload().catch(()=>{});await page.locator('#formal').waitFor();
+  await page.addInitScript(() => {
+    if (location.protocol !== 'chrome-extension:') return;
+    const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+    chrome.runtime.sendMessage = async (...args) => {
+      if (args[0]?.type === 'NOTME_GUARD_REUSE') await new Promise(resolve => setTimeout(resolve, 500));
+      return send(...args);
+    };
+  });
+  await page.reload().catch(()=>{});
+  await page.locator('#environment-loading').waitFor();
+  assert.equal(await page.locator('main').isVisible(),false);
+  await page.locator('#formal').waitFor();
   assert.equal(traffic.some(r=>r.path==='/cdn-cgi/trace'),false);
   assert.equal(await page.evaluate(()=>window.first.language),'en-US');
   traffic.length=0;
