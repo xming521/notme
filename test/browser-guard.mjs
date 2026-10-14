@@ -255,6 +255,21 @@ try {
   assert.equal(await blank.evaluate(win=>new Promise(resolve=>win.navigator.geolocation.getCurrentPosition(()=>resolve('leaked'),error=>resolve(error.code)))),1);
   pass('默认拒绝定位，getCurrentPosition、watchPosition 和继承框架都不返回坐标，且不查询住宅街道或地址');
 
+  const parallelConfirm=await context.newPage();await openGate(parallelConfirm,'https://claude.ai/parallel-confirm');
+  await parallelConfirm.evaluate(()=>{
+    const original=NotmeUDP.probe;
+    NotmeUDP.probe=async options=>{await new Promise(resolve=>window.releaseUDP=resolve);return original(options);};
+  });
+  traffic.length=0;
+  await parallelConfirm.locator('#confirm').click();
+  await wait(async()=>traffic.some(item=>item.host==='claude.ai'&&item.path==='/cdn-cgi/trace'));
+  assert.equal(formalRequests().length,0);
+  assert.equal(await parallelConfirm.locator('#confirm').textContent(),'正在复查…');
+  await wait(async()=>await parallelConfirm.evaluate(()=>typeof window.releaseUDP==='function'));
+  await parallelConfirm.evaluate(()=>window.releaseUDP());
+  await parallelConfirm.locator('#formal').waitFor();await parallelConfirm.close();
+  pass('确认时 HTTPS 复查与 UDP 并行；UDP 尚未完成前不放行正式请求');
+
   const outside=await context.newPage();
   for(const host of ['outside.test','claude.ai.evil.test','fakeanthropic.com','fuck-claude.app.evil.test','www.fuck-claude.vercel.app','other.vercel.app']) {
     await verifyOrdinary(outside,`https://${host}/native-scope`);
