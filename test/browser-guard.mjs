@@ -28,15 +28,21 @@ const server = createServer({ key: await readFile(join(temporary, 'key.pem')), c
     response.setHeader('Alt-Svc','h3=":443"; ma=3600');
     const body = policy.invalid ? 'challenge' : `h=${host.replace(/\.$/, '')}\nip=${policy.ip || '203.0.113.42'}\nloc=${policy.country || 'US'}\ncolo=LAX\nhttp=${policy.protocol || 'http/2'}\n`;
     if (policy.delayMs) setTimeout(() => response.end(body), policy.delayMs); else response.end(body);
-  } else if (host === 'ipwho.is') {
-    const jp = url.pathname.includes('203.0.113.43');
+  } else if (['ipwho.is', 'ipapi.co', 'ipinfo.io'].includes(host)) {
+    const requested = Network.normalizeIP(decodeURIComponent(url.pathname.split('/')[1])) || '203.0.113.42';
+    const geoPolicy = policies.get(`${host}/${requested}`) || policy;
+    const ip = geoPolicy.ip || requested;
+    const jp = ip === '203.0.113.43';
     response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify({ ip: jp ? '203.0.113.43' : '203.0.113.42', success: true, country_code: jp ? 'JP' : 'US',
+    const body = JSON.stringify(geoPolicy.invalid ? {success:false} : { ip, success: true, country_code: geoPolicy.country || (jp ? 'JP' : 'US'),
+      country: geoPolicy.country || (jp ? 'JP' : 'US'),
       latitude: jp ? 35.68 : 34.05, longitude: jp ? 139.69 : -118.24, city: 'Test City',
-      timezone: { id: jp ? 'Asia/Tokyo' : 'America/Los_Angeles' } }));
+      timezone: geoPolicy.missingTimezone ? undefined : host === 'ipwho.is' ? { id: jp ? 'Asia/Tokyo' : 'America/Los_Angeles' }
+        : jp ? 'Asia/Tokyo' : 'America/Los_Angeles' });
+    if (geoPolicy.delayMs) setTimeout(()=>response.end(body),geoPolicy.delayMs); else response.end(body);
   } else if (host === 'reallyfreegeoip.org') {
     response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify({ ip: '203.0.113.42', country_code: 'US', country_name: 'Test country', latitude: 34.05, longitude: -118.24 }));
+    response.end(JSON.stringify({ ip: policy.ip || '203.0.113.42', country_code: policy.country || 'US', country_name: 'Test country', latitude: 34.05, longitude: -118.24 }));
   } else if (/overpass|maps.mail/.test(host)) {
     response.setHeader('Content-Type', 'application/json'); response.end('{"elements":[]}');
   } else if (host === 'api.bigdatacloud.net') {
@@ -197,6 +203,7 @@ try {
 
   await wait(async () => await control.locator('#retry').isEnabled());
   assert.equal(await control.locator('#heading').innerText(), '设置默认环境。');
+  assert.match(await control.locator('#environment-info').textContent(),/第三方查 IP 服务.*不代表 Anthropic/);
   assert.equal(await control.locator('#confirm').isVisible(), false);
   assert.equal(await control.locator('#advanced').evaluate(node => node.open), false);
   assert.equal(await control.locator('#choices input:checked').count(), 7);
@@ -280,7 +287,7 @@ try {
   policies.set('claude.ai', { invalid: true });
   traffic.length = 0; await openGate(another, 'https://claude.ai/unknown');
   assert.equal(await another.locator('#confirm').isEnabled(), false); assert.equal(formalRequests().length, 0);
-  pass('未知出口不能手动绕过检查');
+  pass('目标出口未知时无法生成所选的自动伪装环境');
 
   policies.delete('claude.ai');
   await send({ type: 'SET_SETTINGS', patch: { manualTz: 'Asia/Tokyo' } });
@@ -301,10 +308,10 @@ try {
 
   traffic.length = 0; await openGate(another, 'https://claude.ai/changed');
   policies.set('claude.ai', { country: 'JP', ip: '203.0.113.43' });
-  await another.getByRole('button', { name: '确认并访问', exact: true }).click();
-  await another.locator('#error').getByText('出口或连接状态已变化，请重新检查并确认').waitFor();
-  assert.equal(formalRequests().length, 0);
-  pass('检查后、确认前出口改变时拒绝放行');
+  await confirm(another);
+  assert.equal((await another.evaluate(()=>window.first)).zone,'Asia/Tokyo');
+  assert.equal((await another.evaluate(()=>window.first)).language,'ja-JP');
+  pass('确认前出口换成另一个非限制地区时重新检查并更新环境，不因 IP 不同拒绝访问');
 
   policies.delete('claude.ai'); policies.set('platform.claude.com', { country: 'JP', ip: '203.0.113.43' });
   await openGate(another, 'https://platform.claude.com/japan'); await confirm(another);
@@ -369,25 +376,58 @@ try {
   const hiddenFont = await fontWidths(another); assert.equal(hiddenFont.custom, hiddenFont.generic);
   pass('主动开启 Worker 伪装后使用所选时区语言；字体伪装能隐藏已加载的地区字体');
 
+  await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.set({value:'disable_non_proxied_udp'}));
   const beforeRestricted=udpRequests;
   await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.set({value:'disable_non_proxied_udp'}));
   await openGate(another,'https://claude.ai/udp-protected');
   assert.ok((await checkDetails(another)).includes('未发送 STUN'));
   assert.equal(udpRequests,beforeRestricted);assert.equal(await another.locator('#confirm').isEnabled(),true);
-  pass('当前 WebRTC 保护限制 UDP 时显示未测，且不发送任何 STUN 包');
+  assert.ok((await checkDetails(another)).includes('WebRTC 防泄漏保护已生效'));
+  pass('实际 WebRTC 保护已生效时显示防护通过，且不发送任何 STUN 包');
 
+  await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.clear({}));
   await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.clear({}));
   traffic.length=0;await openGate(another,'https://claude.ai/udp-match');
   assert.ok((await checkDetails(another)).includes('与目标 HTTPS 出口一致'));
   assert.ok(udpRequests>beforeRestricted);assert.equal(formalRequests().length,0);
   assert.equal(await another.locator('#confirm').isEnabled(),true);
-  assert.ok((await checkDetails(another)).includes('目标实际使用 HTTP/2'));
+  assert.ok((await checkDetails(another)).includes('目标 TCP（claude.ai）'));
+  assert.ok((await checkDetails(another)).includes('测试站实际使用 HTTP/2'));
   pass('真实浏览器经本地 UDP/STUN 收到响应；HTTP/2 和 Alt-Svc 不会误报 HTTP/3');
 
   udpIP='203.0.113.99';traffic.length=0;await openGate(another,'https://claude.ai/udp-different');
-  assert.ok((await checkDetails(another)).includes('UDP 出口 203.0.113.99 与目标 HTTPS 出口 203.0.113.42 不同'));
+  assert.match(await checkDetails(another),/UDP 出口 203\.0\.113\.99 · US 与目标 HTTPS 出口 203\.0\.113\.42 不同，可能由分流产生，不代表异常/);
   assert.equal(formalRequests().length,0);assert.equal(await another.locator('#confirm').isEnabled(),true);
-  pass('UDP 与 HTTPS 出口不一致时明确提示分流或代理风险，保持确认前零正式请求');
+  assert.ok((await another.locator('#checks .check').filter({hasText:'UDP / STUN'}).getAttribute('class')).includes('info'));
+  pass('UDP 与 HTTPS 出口不同只显示第三方分流参考，不判为异常，确认前零正式请求');
+
+  for (const country of ['CN','HK']) {
+    policies.set('ipwho.is/203.0.113.99',{country});
+    traffic.length=0;await openGate(another,`https://claude.ai/stun-${country}`);
+    assert.equal(await another.locator('#confirm').isEnabled(),false);
+    assert.match(await checkDetails(another),/UDP 出口.*禁止访问/);
+    assert.match(await checkDetails(another),/第三方参考.*不代表 Anthropic/);
+    assert.equal(formalRequests().length,0);
+  }
+  policies.delete('ipwho.is/203.0.113.99');
+  pass('目标站出口正常时，STUN 地区查询发现任一中国大陆或香港出口仍禁止访问');
+
+  policies.set('ipwho.is/203.0.113.99',{country:'CN',delayMs:800});
+  await another.goto('https://claude.ai/stun-region-pending').catch(error=>{if(!/ERR_ABORTED|ERR_FAILED/.test(error.message))throw error;});
+  await wait(async()=>another.url().startsWith(`chrome-extension://${id}/gate.html`));
+  await another.getByRole('button',{name:'确认并访问',exact:true}).waitFor();
+  const pendingTab=await another.evaluate(async()=> (await chrome.tabs.getCurrent()).id);
+  let pendingView;
+  await wait(async()=>{pendingView=(await send({type:'NOTME_GUARD_STATE',tabId:pendingTab})).value;return !!pendingView?.report && !pendingView.report.diagnosticsComplete;});
+  assert.equal(pendingView.report.ready,false);
+  const premature=await send({type:'NOTME_GUARD_CONFIRM',tabId:pendingTab,navigationId:pendingView.navigationId,
+    selection:pendingView.override,udp:{state:'unknown',ips:[]}});
+  assert.match(premature.error,/环境检查未通过/);
+  await wait(async()=>await another.locator('#retry').isEnabled());
+  assert.equal(await another.locator('#confirm').isEnabled(),false);
+  assert.equal(formalRequests().length,0);
+  policies.delete('ipwho.is/203.0.113.99');udpIP='203.0.113.42';
+  pass('STUN 地区查询未完成前无法提前确认，查询到大陆 IP 后仍保持正式请求为零');
 
   udpRespond=false;await openGate(another,'https://claude.ai/udp-timeout');
   assert.ok((await checkDetails(another)).includes('未取得 STUN 响应'));
@@ -395,10 +435,96 @@ try {
   pass('STUN 超时报告 UDP 未验证，不假定网络故障或阻止正常 HTTPS 访问');
 
   policies.set('claude.ai',{protocol:'http/3'});await openGate(another,'https://claude.ai/h3-observed');
-  assert.ok((await checkDetails(another)).includes('3/3 次目标请求已使用 HTTP/3'));
+  assert.ok((await checkDetails(another)).includes('目标 HTTP/3（claude.ai）'));
   assert.equal(await another.locator('#confirm').isEnabled(),true);
   policies.delete('claude.ai');await send({type:'SET_SETTINGS',patch:{webrtcProtect:true}});
   pass('HTTP/3 仅根据目标 trace 的实际协议字段显示已验证');
+
+  policies.set(Network.HTTP3_TEST_HOST,{protocol:'http/3'});
+  traffic.length=0;await openGate(another,'https://claude.ai/third-party-h3-match');
+  assert.match(await another.locator('#environment-info').textContent(),/目标站 claude.ai 的 HTTPS 请求出口/);
+  await checkDetails(another);
+  const thirdPartyExit=another.locator('#checks .check').filter({hasText:'出口 IP / 地区'});
+  assert.match(await thirdPartyExit.innerText(),/目标 TCP（claude.ai）：203\.0\.113\.42/);
+  assert.match(await thirdPartyExit.innerText(),/HTTP\/3 出口：203\.0\.113\.42/);
+  assert.match(await thirdPartyExit.innerText(),/与目标 HTTPS 出口一致/);
+  assert.match(await thirdPartyExit.innerText(),/第三方参考，仅代表到测试站的出口，不代表 Anthropic/);
+  assert.ok((await thirdPartyExit.getAttribute('class')).includes('ok'));
+  assert.equal(await another.locator('#confirm').isEnabled(),true);
+  assert.ok(traffic.some(item=>item.host===Network.HTTP3_TEST_HOST && item.path==='/cdn-cgi/trace' && !item.cookie));
+  assert.equal(formalRequests().length,0);
+  pass('第三方 HTTP/3 与目标 TCP 出口一致时绿色展示两边 IP 和参考范围，确认前零正式请求');
+
+  policies.set(Network.HTTP3_TEST_HOST,{protocol:'http/3',ip:'203.0.113.99'});
+  await openGate(another,'https://claude.ai/third-party-h3-difference');
+  await checkDetails(another);
+  assert.match(await thirdPartyExit.innerText(),/HTTP\/3 出口：203\.0\.113\.99/);
+  assert.match(await thirdPartyExit.innerText(),/与目标 HTTPS 出口不同，可能由分流产生，不代表异常/);
+  assert.ok((await thirdPartyExit.getAttribute('class')).includes('info'));
+  assert.equal(await another.locator('#confirm').isEnabled(),true);
+  assert.equal(formalRequests().length,0);
+  pass('第三方 HTTP/3 出口差异只作分流参考，保留正常 HTTPS 确认流程');
+
+  for (const protocol of ['http/2','http/3']) {
+    for (const country of ['CN','HK']) {
+      policies.set(Network.HTTP3_TEST_HOST,{protocol,country,ip:'203.0.113.99'});
+      traffic.length=0;await openGate(another,`https://claude.ai/third-party-${protocol.replace('/','-')}-${country}`);
+      assert.equal(await another.locator('#confirm').isEnabled(),false);
+      assert.match(await checkDetails(another),/禁止访问/);
+      assert.equal(formalRequests().length,0);
+    }
+  }
+  policies.delete(Network.HTTP3_TEST_HOST);
+  pass('第三方测试站的 HTTP/3 或 HTTP/2 回退出口出现大陆或香港 IP 都禁止访问');
+
+  for (const country of ['CN','HK']) {
+    policies.set('reallyfreegeoip.org',{country,ip:'203.0.113.99'});
+    traffic.length=0;await openGate(another,`https://claude.ai/default-ip-${country}`);
+    await preset(another,'全部使用系统默认');
+    assert.equal(await another.locator('#confirm').isEnabled(),false);
+    assert.match(await checkDetails(another),/第三方查 IP 服务/);
+    assert.match(await checkDetails(another),/禁止访问/);
+    assert.equal(formalRequests().length,0);
+  }
+  policies.delete('reallyfreegeoip.org');
+  pass('第三方通用查 IP 服务发现大陆或香港出口也禁止访问，系统默认选择不能跳过地区规则');
+
+  policies.set('reallyfreegeoip.org',{country:'CN',ip:'not-an-ip'});
+  await openGate(another,'https://claude.ai/invalid-ip-region');
+  assert.equal(await another.locator('#confirm').isEnabled(),true);
+  assert.match(await checkDetails(another),/未取得有效出口信息/);
+  policies.delete('reallyfreegeoip.org');
+  pass('查 IP 服务的无效地址不被当作已发现的大陆出口，仍显示该来源未验证');
+
+  traffic.length=0;await openGate(another,'https://claude.ai/confirm-third-party-region');
+  policies.set(Network.HTTP3_TEST_HOST,{protocol:'http/2',country:'HK',ip:'203.0.113.99'});
+  await another.getByRole('button',{name:'确认并访问',exact:true}).click();
+  await another.locator('#error').getByText('检测到中国大陆 / 香港出口，禁止访问；请重新检查').waitFor();
+  assert.equal(await another.locator('#confirm').isEnabled(),false);
+  assert.equal(formalRequests().length,0);
+  policies.delete(Network.HTTP3_TEST_HOST);
+  pass('确认时重复检查全部来源，第三方出口在确认前变成香港会被拦截');
+
+  udpIP='203.0.113.99';
+  traffic.length=0;await openGate(another,'https://claude.ai/confirm-stun-region');
+  assert.equal(await another.locator('#confirm').isEnabled(),true);
+  policies.set('ipwho.is/203.0.113.99',{country:'CN'});
+  await another.getByRole('button',{name:'确认并访问',exact:true}).click();
+  await another.locator('#error').getByText('检测到中国大陆 / 香港出口，禁止访问；请重新检查').waitFor();
+  assert.equal(await another.locator('#confirm').isEnabled(),false);
+  assert.equal(formalRequests().length,0);
+  policies.delete('ipwho.is/203.0.113.99');udpIP='203.0.113.42';
+  pass('确认时重新探测 STUN 并查询地区，同一个 UDP IP 的新查询结果变成大陆也立即拦截');
+
+  policies.set(Network.HTTP3_TEST_HOST,{invalid:true});
+  await openGate(another,'https://claude.ai/third-party-h3-unknown');
+  await checkDetails(another);
+  assert.match(await thirdPartyExit.innerText(),/HTTP\/3 出口未验证/);
+  assert.ok((await thirdPartyExit.getAttribute('class')).includes('info'));
+  assert.equal(await another.locator('#confirm').isEnabled(),true);
+  policies.delete(Network.HTTP3_TEST_HOST);
+  pass('第三方探测响应无效时保持未验证，不冒充 HTTP/3 出口一致');
+  await preset(another,'使用 notme 伪装');
 
   traffic.length=0;await openGate(another,'https://claude.ai/inline-settings');
   assert.equal(await another.locator('#advanced').evaluate(node => node.open),false);

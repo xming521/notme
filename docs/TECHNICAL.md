@@ -49,29 +49,48 @@ Browser APIs do not provide a raw TCP handshake or independent DNS result; the
 preflight measures the browser's HTTPS path to the requested hostname.
 
 The trace's `http` field records the protocol of that request. `http=http/3`
-confirms target HTTP/3/QUIC use; a successful HTTPS response, an `Alt-Svc` header,
-HTTP/2 fallback or an absent field does not. The extension cannot force `fetch`
-to use HTTP/3. This diagnostic is informational and does not affect admission.
+confirms HTTP/3/QUIC use; a successful HTTPS response, an `Alt-Svc` header,
+HTTP/2 fallback or an absent field does not. Preflight also requests Cloudflare's
+QUIC test host, `cloudflare-quic.com/cdn-cgi/trace`, up to three times sequentially
+within a shared eight-second timeout, allowing Alt-Svc discovery before retries.
+Only a valid trace from that host reporting HTTP/3 is used as the third-party
+exit reference. Its IP and country are compared with the target's HTTPS exit,
+with the source and scope shown in both the exit row and protocol diagnostic.
+The target trace remains the input for spoofed geolocation. All valid returned
+IPs, including HTTP/2 fallback and earlier retries, participate in the region rule.
+An exit difference is informational and can result from split routing.
+The extension cannot force `fetch` to use HTTP/3.
 
 `lib/udp.js` runs in the local gate page, where `RTCPeerConnection` is available.
 Under `disable_non_proxied_udp`, it returns a restricted result without creating
-a peer or modifying privacy settings. Otherwise it gathers ICE candidates with
+a peer or modifying privacy settings; the verified policy is displayed as a
+passed WebRTC protection check, without claiming an observed UDP exit.
+Otherwise it gathers ICE candidates with
 Cloudflare's documented [STUN UDP endpoint](https://developers.cloudflare.com/realtime/turn/#service-address-and-ports)
 for at most four seconds, alongside the HTTPS checks. Only `udp` / `srflx`
 candidates establish a response; local, mDNS, TCP and relay candidates do not.
 The peer is closed on completion, error or timeout. Public addresses are
-normalized before comparison with the HTTPS exit. Different endpoints can have
-different legitimate routes, so a mismatch is a warning, not a proven IP leak.
+normalized before comparison with the HTTPS exit and looked up using
+`IPLoc.getCountryForIP`, which requires neither coordinates nor a timezone.
+Different endpoints can have different legitimate routes, so a mismatch is
+informational and is not considered a failure.
 No response remains unknown. The result reflects the current policy; the chosen
 WebRTC setting still applies only on confirmation.
 
 `lib/guard.js` keeps the pending target and profile per tab in session storage.
-Every main-frame navigation creates a fresh check. The gate requires the HTTPS
-and selected-profile checks to pass, then a separate click; their warnings and
-unknown results cannot be bypassed. UDP and HTTP/3 diagnostics are informational.
-Confirmation repeats the three probes, requires the same exit IP and country,
-and rejects changed admission settings or selections. A check is
-valid for at most 60 seconds.
+Every main-frame navigation creates a fresh check. Target traces, third-party
+test traces, default IP-provider responses, geolocation responses and every
+STUN public IP feed `NotmeNetwork.applyExitPolicy`. Only mainland China (`CN`)
+and Hong Kong (`HK`) trigger a region ban; a match from any source blocks access.
+Observations accumulate for one check, so a later allowed response cannot hide
+an earlier restricted one. Unknown regions remain informational. A latency-only
+warning does not block access; connectivity and selected-profile data still need
+to be usable. `ready` remains false until STUN country lookups finish, and their
+results are tied to a check ID to reject stale completions.
+Confirmation repeats every check before installing an allow rule. An allowed
+exit change updates the profile rather than failing an equality check. Changed
+settings or selections invalidate confirmation. A check is valid for at most
+60 seconds.
 
 Confirmation installs a temporary main-frame allow rule limited to that tab,
 host and extension initiator. `onCommitted` removes it. The tab retains a

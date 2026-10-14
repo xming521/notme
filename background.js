@@ -221,7 +221,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 self.notmeGuardSettings = getSettings;
 self.notmeGuardIdentity = () => IDENTITY_PROFILE;
-self.notmePrepareEnvironment = async (network, settings, selection) => {
+self.notmePrepareEnvironment = async (network, settings, selection, onExit) => {
   let location = null;
   let profile = {};
   if (NotmeEnvironment.needsLocation(selection) && settings.manualTz) {
@@ -232,8 +232,9 @@ self.notmePrepareEnvironment = async (network, settings, selection) => {
       && stored.state.ipCountryCode === network.trace.country && stored.state.ipTimezone) {
       location = { ip: stored.state.ip, countryCode: stored.state.ipCountryCode, timezone: stored.state.ipTimezone,
         city: stored.state.ipCity, lat: stored.state.ipLat, lon: stored.state.ipLon };
-    } else location = await IPLoc.getLocationForIP(network.trace.ip, settings.ipToken);
+    } else location = await IPLoc.getLocationForIP(network.trace.ip, settings.ipToken, onExit);
     if (location) {
+      onExit?.({ ...location, provider: location.provider || '缓存的地理查询' });
       const locale = Locale.localeFor(location.countryCode, location.timezone);
       const pick = stored.state?.status === 'ok' && stored.state.ip === network.trace.ip && stored.override?.lat != null
         ? stored.override : selection.enabled

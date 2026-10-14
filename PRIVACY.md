@@ -6,7 +6,7 @@ what data the extension touches, where it goes, and where it does **not** go.
 ## The short version
 
 notme sends no telemetry or analytics. Its background requests are limited to
-the destination's network diagnostic endpoint and the geolocation/map services
+the destination and third-party network diagnostic endpoints and the geolocation/map services
 listed below, using the data needed for those checks.
 
 ## What the extension does
@@ -39,6 +39,19 @@ listed below, using the data needed for those checks.
    camera, remote peer, cookies or credentials are used. The STUN server sees the
    source address of that UDP path, which may differ from the HTTPS proxy exit.
    With non-proxied UDP protection active, no STUN probe is sent.
+   Each observed STUN IP is sent to the listed geolocation providers for a country
+   lookup. The check page waits for these lookups before enabling confirmation.
+9. Each preflight also makes up to three sequential, cookie-free requests to
+   Cloudflare's QUIC test host, `cloudflare-quic.com/cdn-cgi/trace`, within an
+   eight-second timeout. Only a response reporting `http=http/3` verifies an
+   HTTP/3 exit. Its IP and country are compared with the destination's observed
+   exit as a third-party reference; this does not verify Anthropic's HTTP/3 path.
+10. Preflight and confirmation also query the listed IP services for their
+    observed default exit. Every valid observed IP and region, including earlier
+    provider attempts and HTTP/2 fallback, participates in one region rule:
+    mainland China (`CN`) or Hong Kong (`HK`) blocks access regardless of source.
+    Different IPs alone do not block access. Confirmation repeats the checks,
+    including permitted STUN probes and their country lookups.
 
 ## Network requests (the complete list)
 
@@ -50,11 +63,12 @@ listed below, using the data needed for those checks.
 | `ipinfo.io` | Fallback IP geolocation; optional token if you provide one | GET; your token if entered |
 | Requested host under `anthropic.com`, `claude.ai`, `claude.com`, `claude.app`, `claudeusercontent.com`, `claudemcpcontent.com`, `claude.site` | HTTPS connectivity and destination-exit check | GET `/cdn-cgi/trace`; no cookies or credentials |
 | `stun.cloudflare.com:3478/udp` | UDP response and exit-address diagnostic | STUN binding packets; the UDP source IP is visible to the service |
+| `cloudflare-quic.com` | Third-party HTTP/3 exit reference | GET `/cdn-cgi/trace`; no cookies, credentials or referrer; the connection's source IP is visible to the service |
 | `overpass-api.de`, `overpass.kumi.systems`, `maps.mail.ru/osm/tools/overpass` | Find nearby residential roads (OpenStreetMap) | The exit-IP latitude/longitude |
 | `api.bigdatacloud.net` | Reverse-geocode the chosen point for display | The chosen override latitude/longitude |
 
 These are the background endpoints used by the extension. Explicit destination-IP
-lookups send that observed IP to `ipwho.is`, `ipapi.co`, or `ipinfo.io`; these
+and STUN-IP lookups send those observed IPs to `ipwho.is`, `ipapi.co`, or `ipinfo.io`; these
 services may see a different source IP under split routing. Host access is
 limited to the seven Anthropic roots and listed IP/map providers. Content
 scripts match only Anthropic origins and inherited-origin frames.
@@ -73,8 +87,11 @@ scripts match only Anthropic origins and inherited-origin frames.
   Per-visit spoof/default flags, including page-local WebRTC protection, are
   stored with that profile. No browser-wide WebRTC override is applied.
   The UDP diagnostic retains only the resulting public-address summary, not SDP
-  or host/mDNS candidate addresses. HTTP/3 detection reuses the target trace and
-  adds no endpoint.
+  or host/mDNS candidate addresses. The third-party HTTP/3 diagnostic retains
+  only the reported exit IP, country, data-center code, protocol and probe error.
+  Region observations retain each detected IP, reported region and source for
+  the current check, so a restricted result cannot be overwritten by a later
+  allowed one. Unknown regions are recorded as unverified.
 - The checked profile is temporarily carried in a URL fragment on admission.
   Fragments are not sent in HTTP requests; the MAIN-world injector consumes it
   at document start and restores the original fragment.

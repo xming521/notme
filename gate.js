@@ -84,12 +84,13 @@ async function api(message) {
 async function send(type, extra = {}) {
   return (await api({ type: 'NOTME_GUARD_' + type, tabId, ...extra })).value;
 }
-function showInfo(snapshot) {
+function showInfo(snapshot, exitSource) {
   const state = snapshot.state || {};
   const profile = snapshot.override || {};
   const source = { overpass: '附近住宅街道', jitter: '附近位置偏移', ipcenter: '出口位置' };
   const values = {
     '出口 IP': state.ip, '出口地区': [state.ipCity, state.ipRegion, state.ipCountry].filter(Boolean).join(' · '),
+    '出口来源': exitSource || `第三方查 IP 服务（${state.provider || '地理查询服务'}）；不代表 Anthropic，可能因分流而不同`,
     '网络服务商': state.isp, '伪装地址': state.overrideAddress,
     '位置来源': source[state.overrideSource],
     '更新时间': state.lastUpdated && new Date(state.lastUpdated).toLocaleString('zh-CN'),
@@ -112,7 +113,7 @@ function render(view) {
       overrideAddress: view.override?.enabled && view.override.lat === globalSnapshot.override?.lat
         ? globalSnapshot.state?.overrideAddress : null },
     override: view.override?.enabled ? view.override : null,
-  });
+  }, `目标站 ${new URL(view.target).hostname} 的 HTTPS 请求出口`);
   $('#checks').replaceChildren(...(view.report?.checks || []).map(check => {
     const row = document.createElement('div'); row.className = 'check ' + check.status;
     const icon = document.createElement('span'); icon.textContent = check.status === 'ok' ? '✓' : check.status === 'warn' ? '!' : check.status === 'info' ? 'i' : '×';
@@ -155,7 +156,7 @@ async function check() {
       send('CHECK', { selection: chosen }), NotmeUDP.probe({ policy: policy.value }),
     ]);
     if (current !== revision) return;
-    const updated = await send('UDP', { navigationId: view.navigationId, selection: chosen, udp });
+    const updated = await send('UDP', { navigationId: view.navigationId, checkId: view.report.id, selection: chosen, udp });
     if (current === revision) render(updated);
   }
   catch (error) { if (current === revision) $('#error').textContent = error.message; }
@@ -202,8 +203,14 @@ $('#confirm').onclick = async () => {
   busy = true; $('#confirm').disabled = true;
   const controls = document.querySelectorAll('#choices input, #choices select, #advanced input, .presets button, #save-defaults, #retry');
   for (const input of controls) input.disabled = true;
-  try { const destination = await send('CONFIRM', { navigationId, selection: selection() }); location.replace(destination); }
+  try {
+    const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
+    const udp = await NotmeUDP.probe({ policy: policy.value });
+    const destination = await send('CONFIRM', { navigationId, selection: selection(), udp }); location.replace(destination);
+  }
   catch (error) {
+    const view = await send('STATE');
+    if (view?.report) render(view);
     $('#error').textContent = error.message; busy = false;
     for (const input of controls) input.disabled = false;
   }
