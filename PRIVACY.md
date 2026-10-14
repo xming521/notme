@@ -130,4 +130,4 @@ The gate URL fragment retains the complete pending destination so browser sessio
 
 The `declarativeNetRequestFeedback` permission observes actual rule matches in unpacked installations. Block notices show only the source and destination hostnames locally, without URL paths or query parameters. The `notifications` permission displays the notice; a per-tab session flag deduplicates it until navigation or tab closure. No additional content scripts or host permissions are added.
 
-The latest valid target exit IP and observation time are stored per probed hostname in `chrome.storage.local` for comparison across visits and browser restarts. Invalid or missing trace responses do not replace the record. These records are not uploaded and contain no page paths or query parameters.
+The latest ten valid target exit IP observations and times are stored per probed hostname in `chrome.storage.local` for comparison across visits and browser restarts. Repeated checks within a visit update its entry. Invalid or missing trace responses do not replace records. These records are not uploaded and contain no page paths or query parameters.

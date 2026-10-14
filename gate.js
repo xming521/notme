@@ -148,6 +148,13 @@ function networkCard(id, title, source, status, badge, exits, fields = [], note 
 }
 function renderNetwork(view) {
   const report = view.report || {};
+  const changed = report.exitRecord?.changed;
+  $('#exit-alert').hidden = !changed;
+  if (changed) {
+    $('#exit-alert-host').textContent = report.host;
+    $('#exit-alert-before').textContent = report.exitRecord.previous.ip;
+    $('#exit-alert-after').textContent = report.exitRecord.current.ip;
+  }
   const probes = report.probes || [];
   const reachable = probes.filter(probe => probe.reachable);
   const average = reachable.length ? Math.round(reachable.reduce((sum, probe) => sum + probe.durationMs, 0) / reachable.length) : null;
@@ -171,6 +178,18 @@ function renderNetwork(view) {
         + '（上次：' + new Date(previous.checkedAt).toLocaleString() + '）'
       : '首次记录此域名的出口 IP。';
     target.append(record);
+    const history = document.createElement('details'); history.className = 'exit-history';
+    const heading = document.createElement('summary');
+    heading.textContent = '最近 ' + report.exitRecord.history.length + ' 次记录'; history.append(heading);
+    const list = document.createElement('ol');
+    for (const item of report.exitRecord.history) {
+      const row = document.createElement('li');
+      const address = document.createElement('b'); address.textContent = item.ip;
+      const time = document.createElement('time'); time.dateTime = new Date(item.checkedAt).toISOString();
+      time.textContent = new Date(item.checkedAt).toLocaleString();
+      row.append(address, time); list.append(row);
+    }
+    history.append(list); target.append(history);
   }
   const thirdParty = report.thirdPartyHTTP3 || {};
   const cloudflareTrace = thirdParty.trace;
@@ -241,6 +260,7 @@ function renderSettings(snapshot) {
 }
 async function check() {
   const current = ++revision;
+  $('#exit-alert').hidden = true;
   busy = true; $('#confirm').disabled = true; $('#retry').disabled = true; $('#error').textContent = '';
   showChoices(); $('#summary').textContent = settingsOnly ? '正在读取环境…' : '正在检查网络与所选环境…';
   if (!settingsOnly) {

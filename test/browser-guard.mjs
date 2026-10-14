@@ -701,18 +701,27 @@ try {
   policies.set('claude.ai',{ip:'203.0.113.43',country:'JP'});
   await openGate(exitPage,'https://claude.ai/exit-changed');
   assert.match(await exitPage.locator('.exit-change').textContent(),/203\.0\.113\.42 → 203\.0\.113\.43/);
+  assert.equal(await exitPage.locator('#exit-alert').isVisible(),true);
+  assert.equal(await exitPage.locator('#exit-alert-before').textContent(),'203.0.113.42');
+  assert.equal(await exitPage.locator('#exit-alert-after').textContent(),'203.0.113.43');
+  assert.ok(await exitPage.evaluate(()=>document.querySelector('#exit-alert').getBoundingClientRect().top < document.querySelector('#diagnostics').getBoundingClientRect().top));
   assert.equal(await exitPage.locator('#confirm').isEnabled(),true);
   await exitPage.locator('#retry').click();await wait(async()=>await exitPage.locator('#retry').isEnabled());
   assert.equal(await exitPage.locator('.exit-change').count(),1);
+  assert.equal(await exitPage.locator('.exit-history li').count(),2);
   policies.set('claude.ai',{invalid:true});
   await openGate(exitPage,'https://claude.ai/exit-failed');
-  assert.equal(await control.evaluate(async()=> (await chrome.storage.local.get('targetExitRecords')).targetExitRecords['claude.ai'].ip),'203.0.113.43');
+  assert.equal(await control.evaluate(async()=> (await chrome.storage.local.get('targetExitRecords')).targetExitRecords['claude.ai'][0].ip),'203.0.113.43');
   policies.set('claude.ai',{ip:'203.0.113.43',country:'JP'});
   await openGate(exitPage,'https://claude.ai/exit-same');
   assert.equal(await exitPage.locator('.exit-change').count(),0);
   assert.match(await exitPage.locator('#target-network').textContent(),/与上次相同/);
+  assert.equal(await exitPage.locator('#exit-alert').isVisible(),false);
   await openGate(exitPage,'https://www.anthropic.com/exit-independent');
   assert.match(await exitPage.locator('#target-network').textContent(),/首次记录/);
+  for(let i=0;i<10;i++) await openGate(exitPage,'https://claude.ai/history-'+i);
+  assert.equal(await exitPage.locator('.exit-history li').count(),10);
+  assert.equal(await control.evaluate(async()=> (await chrome.storage.local.get('targetExitRecords')).targetExitRecords['claude.ai'].length),10);
   await exitPage.close();policies.delete('claude.ai');
   pass('按域名记录出口，变化提醒不阻断，同次重检保留提醒，失败不覆盖记录，各域名独立');
   const recoveryTargets=['https://claude.ai/chat/restore-one?x=1#anchor','https://www.anthropic.com/restore-two?x=2#section'];
@@ -746,7 +755,7 @@ try {
     await page.close();
   }
   pass('浏览器重启后恢复多个检查页的完整网址，重新检查确认前零正式请求');
-  assert.ok(await control.evaluate(async()=> (await chrome.storage.local.get('targetExitRecords')).targetExitRecords['claude.ai']?.ip));
+  assert.ok(await control.evaluate(async()=> (await chrome.storage.local.get('targetExitRecords')).targetExitRecords['claude.ai']?.[0]?.ip));
   const movedSettings=(await send({type:'GET_STATE'})).settings;
   assert.equal(movedSettings.accuracyM,45);assert.deepEqual(movedSettings.guardDefaults,savedDefaults);
   assert.equal((await control.evaluate(()=>chrome.declarativeNetRequest.getDynamicRules())).some(rule=>[9001,9002,9003,9004,9005,19000,19001].includes(rule.id)),false);

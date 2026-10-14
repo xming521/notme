@@ -105,3 +105,15 @@ footer { color: var(--muted); font-size: 16px; border-top: 1px solid var(--line)
 }
 
 .exit-change { margin: 16px 0 0; padding: 10px 12px; border-radius: 8px; background: #fff2d9; color: #805000; font-size: 16px; overflow-wrap: anywhere; }
+
+.exit-history { border: 0; background: transparent; }
+.exit-history summary { padding: 8px 0; font-size: 15px; }
+.exit-history ol { padding-left: 22px; margin: 0; font-size: 15px; }
+.exit-history li { padding: 5px 0; overflow-wrap: anywhere; }
+.exit-history time { display: block; color: var(--muted); font-size: 14px; }
+
+#exit-alert { margin: 0 0 20px; padding: 18px 22px; border: 2px solid #b45309; border-left-width: 7px; border-radius: 12px; background: #fff2d9; color: #78350f; }
+#exit-alert strong { display: block; font-size: 21px; }
+#exit-alert p { margin: 6px 0; }
+#exit-alert div { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 7px 0; }
+#exit-alert b { font: 600 20px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; min-width: 0; }

@@ -4,6 +4,7 @@
   <header><img src="icons/icon48.png" alt=""><b>notme</b><span>环境选择与设置</span></header>
   <p id="eyebrow" class="eyebrow">访问前环境检查</p><h1 id="heading">选择这次访问的环境。</h1>
   <p id="summary" class="banner" role="status">正式网页请求已拦截，请选择环境。</p><p id="target" class="target"></p>
+  <aside id="exit-alert" role="alert" hidden><strong>⚠ 出口 IP 已变化</strong><p id="exit-alert-host"></p><div><span>上次 IP</span><b id="exit-alert-before"></b></div><div><span>本次 IP</span><b id="exit-alert-after"></b></div><p>请确认代理线路是否符合预期，再继续访问。</p></aside>
   <details id="diagnostics" open><summary id="check-summary">网络检查 <span id="network-status">正在检查</span><span id="network-elapsed"></span></summary><section id="checks" aria-live="polite"></section><p class="network-note">Cloudflare 和 UDP 使用第三方测试路径。出口不同可能由分流产生。</p></details>
   <h2 id="environment-heading">本次访问环境</h2>
   <div class="presets"><button id="preset-spoof" class="secondary" disabled>使用 notme 伪装</button><button id="preset-native" class="secondary" disabled>全部使用系统默认</button><span id="mode"></span></div>
