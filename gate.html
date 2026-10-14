@@ -6,7 +6,7 @@
   <p id="summary" class="banner" role="status">正式网页请求已拦截，请选择环境。</p><p id="target" class="target"></p>
   <div id="check-progress" hidden><div class="progress-heading"><span id="progress-label" role="status"></span><span id="progress-time"></span></div><div id="progress-track" role="progressbar" aria-label="环境检查进度"><div id="progress-fill"></div></div><ol class="progress-steps"><li>准备环境</li><li>网络检测</li><li>出口核验</li></ol></div>
   <aside id="exit-alert" role="alert" hidden><strong>⚠ 出口 IP 已变化</strong><p id="exit-alert-host"></p><div><span>上次 IP</span><b id="exit-alert-before"></b></div><div><span>本次 IP</span><b id="exit-alert-after"></b></div><p>请确认代理线路是否符合预期，再继续访问。</p></aside>
-  <details id="diagnostics" open><summary id="check-summary">网络检查 <span id="network-status">正在检查</span><span id="network-elapsed"></span></summary><section id="checks" aria-live="polite"></section><p class="network-note">检查完成后 15 秒内确认直接进入；超时自动复查。切换代理后请重新检查。Cloudflare 和 UDP 为第三方测试路径。</p></details>
+  <details id="diagnostics" open><summary id="check-summary">网络检查 <span id="network-status">正在检查</span><span id="network-elapsed"></span></summary><section id="checks" aria-live="polite"></section><p class="network-note">检查完成后 15 秒内确认直接进入；超时自动复查。确认后同标签同域 24 小时内刷新免检；切换代理后点击扩展图标重新检查。Cloudflare 和 UDP 为第三方测试路径。</p></details>
   <h2 id="environment-heading">本次访问环境</h2>
   <div class="presets"><button id="preset-spoof" class="secondary" disabled>使用 notme 伪装</button><button id="preset-native" class="secondary" disabled>全部使用系统默认</button><span id="mode"></span></div>
   <section id="choices" aria-label="环境选择"></section>
@@ -23,5 +23,5 @@
   </details>
   <p id="error" role="alert"></p><p id="saved" role="status"></p>
   <div class="actions"><button id="confirm" disabled>确认并访问</button><button id="retry" class="secondary" disabled>重新检查</button><button id="save-defaults" class="secondary" disabled>保存为默认</button><button id="close" class="secondary">关闭标签页</button></div>
-  <footer id="scope">用于 Anthropic / Claude 和两个 Fuck Claude 检测站。每次打开或刷新都先选择本次环境，再确认访问；保存为默认只用于下次预选。</footer>
+  <footer id="scope">用于 Anthropic / Claude 和两个 Fuck Claude 检测站。首次检查并确认后，同一标签页、同一域名 24 小时内沿用本次环境；保存为默认只用于下次预选。</footer>
 </main><script src="lib/environment.js"></script><script src="lib/tzdata.js"></script><script src="lib/udp.js"></script><script src="gate.js"></script></body></html>

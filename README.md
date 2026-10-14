@@ -12,7 +12,7 @@ notme is a Chrome Manifest V3 extension for people who use proxies, VPNs, remote
 
 | Feature | What it does |
 | --- | --- |
-| Choose before each visit | Opening or reloading a protected site runs checks and waits for your confirmation. Settings and per-visit choices share one page. |
+| Reuse an approved environment for one day | Same-tab, same-host reloads and navigations reuse approval for 24 hours without extending it. New tabs, changed hosts or settings, browser restarts and expiry require checks. |
 | Independent environment choices | Choose spoofing or native values for location, timezone, language/headers, device identity, fonts, Web Workers and WebRTC. Location also offers “Do not provide location,” the default. Save choices to preselect them next time. |
 | Site scope and independent tabs | Apply the selected profile only to approved Anthropic / Claude pages and the two listed verification sites. Other sites retain native language, timezone and browser signals; tabs do not overwrite one another. |
 | Exit and protocol diagnostics | A stage progress bar shows the current step and elapsed time. Network checks appear first, with separate target, Cloudflare and UDP cards. HTTP/3 is verified from the actual protocol; HTTP/2 fallback still shows the test site's observed IP. |
@@ -20,14 +20,14 @@ notme is a Chrome Manifest V3 extension for people who use proxies, VPNs, remote
 | Prominent IP-change notice | An orange banner above the checks shows the previous and current IP when they differ. A change alone does not block access; region restrictions still apply. |
 | Fast confirmation within 15 seconds | Use a completed check directly within 15 seconds. Older results trigger fresh checks, with UDP probing and HTTPS/HTTP3 rechecks running together. Settings changes invalidate the result; rerun checks after switching proxy routes. |
 | Restore the destination after restart | Gate pages retain the full destination URL. Restored tabs require a fresh check and confirmation. Addresses already lost by older versions must be recovered from browser history. |
-| Third-party exit-test compatibility | Allow HTTPS GET / fetch requests to the exact `/cdn-cgi/trace` path on protected domains. Other blocked requests from ordinary pages trigger a badge and system notification once per navigation. Live notices require an unpacked installation. |
+| Third-party exit-test compatibility | Allow HTTPS GET / fetch requests to the exact `/cdn-cgi/trace` path on protected domains. Other blocked requests trigger a badge and notification once per destination per page. Click to review source and destination hosts and temporarily allow this page, then retry the original action. Reloading, leaving or closing the page revokes permission. Live notices require an unpacked installation. |
 | Stable extension ID | Update by overwriting the existing extension directory and reloading, preserving the extension identity and saved preferences. |
 
 The two verification hosts are `fuck-claude.vercel.app` and `fuck-claude.app`. Their preflight checks the `claude.ai` exit, then confirmation opens the original site. Records describe the **client exit IP** observed by the diagnostic endpoint, not the website server's IP, and are stored locally only. The latency warning defaults to **1500 ms** and can be changed in advanced settings.
 
 ## Anthropic navigation checks
 
-Opening or reloading an Anthropic URL first redirects to a local environment selection page. Choose **Use notme spoofing**, **Use system defaults**, or set each surface independently. The static rules block the site's main HTML and subresources until the checks pass **and you click Confirm**. A previous visit or another tab does not authorize a new navigation.
+Opening an Anthropic URL for the first time redirects to a local environment selection page. Choose **Use notme spoofing**, **Use system defaults**, or set each surface independently. The static rules block the site's main HTML and subresources until the checks pass **and you click Confirm**. Approval lasts 24 hours for the same tab and exact hostname; reloads do not extend it. New tabs, host or settings changes, browser restarts and expiry require checks. After switching proxies, click the toolbar icon on the protected page to recheck immediately.
 
 The toolbar and navigation gate now share one Chinese environment page. All seven choices and the timezone selector are together; network checks appear first as three readable cards for the target, Cloudflare and UDP; advanced preferences stay collapsed. HTTP/2 fallback still shows the Cloudflare-observed exit IP and region, with the actual protocol separate from HTTP/3 verification. IP-provider observations remain part of the region rule without a separate display row. Timezone, latency threshold, accuracy, refresh interval and optional token changes are saved immediately and trigger fresh checks. **Save as default** remembers the seven choices for future Anthropic visits and the two verification sites. Saving settings does not authorize a navigation.
 
@@ -203,7 +203,7 @@ The two listed Fuck Claude verification sites use the choices confirmed for that
 
 Geolocation defaults to **Do not provide location**: page location requests are denied, and residential-road and reverse-address lookups are skipped. Choose **Spoof** or **System default** explicitly if location is needed. IP-region services run in parallel with a four-second deadline per group, including response bodies; every detected restricted-region observation is retained. The check page shows its current stage and elapsed time.
 
-Choices apply to Anthropic visits and the two listed verification sites; verification sites also require selection and confirmation on every visit. Updating to 1.8.2 clears the legacy global header rules and WebRTC control. Reload affected open pages once to discard old page wrappers; the fixed extension ID stays unchanged.
+Choices apply to Anthropic visits and the two listed verification sites; verification sites use the same 24-hour, same-tab approval policy. Updating to 1.8.2 clears the legacy global header rules and WebRTC control. Reload affected open pages once to discard old page wrappers; the fixed extension ID stays unchanged.
 
 - **Location spoof** — enable/disable geolocation override.
 - **Timezone spoof** — enable/disable the `Date` and `Intl` timezone override.

@@ -399,6 +399,10 @@ $('#close').onclick = () => chrome.tabs.remove(tabId);
     for (let i = 0; i < 20; i++) { view = await send('STATE', { target: new URLSearchParams(location.hash.slice(1)).get('target') }); if (view) break; await new Promise(resolve => setTimeout(resolve, 100)); }
     if (view?.target) history.replaceState(null, '', '#target=' + encodeURIComponent(view.target));
     if (!view) throw new Error('原访问地址未保存，无法恢复。请从浏览器历史记录重新打开原页面。');
+    if (view.phase === 'checking') {
+      const destination = await send('REUSE');
+      if (destination) { location.replace(destination); return; }
+    }
     settingsOnly = view.phase !== 'checking';
   }
   const snapshot = await api({ type: 'GET_STATE' }); settings = snapshot.settings; globalSnapshot = snapshot;

@@ -151,6 +151,7 @@ try {
     throw new Error('Browser condition timed out');
   };
   const openGate = async (page, url) => {
+    if (Network.protectedHost(page.url())) await page.goto('https://outside.test/new-visit');
     await page.goto(url).catch(error => { if (!/ERR_ABORTED|ERR_FAILED/.test(error.message)) throw error; });
     await wait(async () => page.url().startsWith(`chrome-extension://${id}/gate.html`));
     await page.getByRole('button', { name: '确认并访问', exact: true }).waitFor();
@@ -314,10 +315,35 @@ try {
   }
   await wait(async()=>await control.evaluate(id=>chrome.action.getBadgeText({tabId:id}),diagnosticId)==='!');
   assert.match(await control.evaluate(id=>chrome.action.getTitle({tabId:id}),diagnosticId),/outside\.test.*claude\.ai.*notme 拦截/);
+  const reviewPage=await context.newPage();await reviewPage.goto('chrome-extension://'+id+'/review.html?tab='+diagnosticId);
+  await reviewPage.locator('#allow:enabled').waitFor();
+  assert.match(await reviewPage.locator('#source').textContent(),/outside.test/);
+  assert.match(await reviewPage.locator('#destinations').textContent(),/claude.ai/);
+  await reviewPage.locator('#allow').click();await wait(async()=>/已临时允许/.test(await reviewPage.locator('#result').textContent()));
+  traffic.length=0;
+  await diagnostic.evaluate(()=>fetch('https://claude.ai/api/test',{mode:'no-cors'}));
+  assert.ok(traffic.some(r=>r.host==='claude.ai'&&r.path==='/api/test'));
+  traffic.length=0;
+  await diagnostic.evaluate(()=>fetch('https://anthropic.com/api/test',{mode:'no-cors'}).catch(()=>{}));
+  assert.equal(traffic.some(r=>r.host==='anthropic.com'),false);
   await diagnostic.goto('https://outside.test/clean');
+  traffic.length=0;
+  await diagnostic.evaluate(()=>fetch('https://claude.ai/api/test',{mode:'no-cors'}).catch(()=>{}));
+  assert.equal(traffic.some(r=>r.host==='claude.ai'),false);
+  const stale=await send({type:'NOTME_GUARD_ALLOW_REQUESTS',tabId:diagnosticId,reviewId:'stale',destinations:['claude.ai']});
+  assert.ok(stale.error);await reviewPage.close();
+  await diagnostic.goto('https://outside.test/clean-again');
   await wait(async()=>await control.evaluate(id=>chrome.action.getBadgeText({tabId:id}),diagnosticId)==='');
+  traffic.length=0;
+  await diagnostic.evaluate(()=>{location.href='https://claude.ai/oauth/callback?code=synthetic&state=synthetic';});
+  await wait(async()=>diagnostic.url().startsWith('chrome-extension://'+id+'/gate.html') && diagnostic.url().includes('#target='));
+  await wait(async()=>diagnostic.locator('#retry').isEnabled());
+  assert.match(await diagnostic.locator('#target').textContent(),/oauth\/callback\?code=synthetic&state=synthetic/);
+  assert.equal(formalRequests().length,0);
+  await confirm(diagnostic);
+  assert.ok(traffic.some(r=>r.host==='claude.ai'&&r.path==='/oauth/callback'));
   await diagnostic.close();
-  pass('第三方 GET trace 可读且不误报，其他路径与 POST 仍拦截并提示，导航后清除提示');
+  pass('第三方请求可审核临时放行，仅允许审核域名，导航后撤销；第三方授权回调正常进入检查页并保留参数');
 
   const verification = await context.newPage();
   for (const host of Network.VERIFICATION_DOMAINS) {
@@ -338,7 +364,7 @@ try {
   }
   pass('两个检测站先选择并确认本次环境，确认前对检测站零请求，首个脚本及请求头已使用伪装');
 
-  traffic.length=0;await verification.reload();
+  traffic.length=0;await worker.evaluate(()=>{Date.originalNow=Date.now;Date.now=()=>Date.originalNow()+86400001;});await verification.reload();
   await wait(async()=>verification.url().startsWith(`chrome-extension://${id}/gate.html`)&&await verification.locator('#retry').isEnabled());
   assert.equal(formalRequests().length,0);assert.equal(await verification.locator('#formal').count(),0);
   await preset(verification,'全部使用系统默认');await confirm(verification);
@@ -347,7 +373,8 @@ try {
   assert.deepEqual(await workerProfile(verification),baselineWorker);assert.equal(await rtc(verification),'allowed');
   const nativeWidths=await fontWidths(verification);assert.notEqual(nativeWidths.custom,nativeWidths.generic);
   assert.ok(traffic.findLast(item=>item.host==='fuck-claude.app'&&item.path==='/verification-choice').language.startsWith(original.language));
-  pass('检测站刷新重新选择，全部系统默认保留首个脚本、GPS、Worker、字体、WebRTC 和请求头的原生值');
+  await worker.evaluate(()=>{Date.now=Date.originalNow;});
+  pass('检测站超过一天后刷新重新选择，全部系统默认保留首个脚本、GPS、Worker、字体、WebRTC 和请求头的原生值');
 
   traffic.length=0;await openGate(verification,'https://fuck-claude.app/verification-mixed');
   await select(verification,'语言与请求头','系统默认');await select(verification,'后台脚本（Web Worker）','伪装');
@@ -378,10 +405,25 @@ try {
   pass('检测站进入前发现大陆出口时禁止确认，系统默认不能绕过，正式页面保持零请求');
 
   traffic.length = 0;
-  await page.reload();
+  await page.reload().catch(()=>{});await page.locator('#formal').waitFor();
+  assert.equal(traffic.some(r=>r.path==='/cdn-cgi/trace'),false);
+  assert.equal(await page.evaluate(()=>window.first.language),'en-US');
+  traffic.length=0;
+  await page.goto('https://claude.ai/same-day?preserved=1#hash').catch(()=>{});await page.locator('#formal').waitFor();
+  assert.equal(traffic.some(r=>r.path==='/cdn-cgi/trace'),false);
+  assert.equal(await page.evaluate(()=>window.first.hash),'#hash');
+  await worker.evaluate(()=>{Date.originalNow=Date.now;Date.now=()=>Date.originalNow()+86400001;});
+  traffic.length=0;await page.reload().catch(()=>{});
   await wait(async () => page.url().startsWith(`chrome-extension://${id}/gate.html`) && await page.locator('#retry').isEnabled());
-  assert.equal(formalRequests().length, 0); await confirm(page);
-  pass('同一标签页刷新也重新检查、重新确认，旧放行不能复用');
+  await worker.evaluate(()=>{Date.now=Date.originalNow;});
+  assert.equal(formalRequests().length,0);await confirm(page);
+  pass('同标签同域刷新及跳转一天内复用环境且不发探测请求，超过一天重新检查');
+  traffic.length=0;
+  const activeId=await control.evaluate(async()=> (await chrome.tabs.query({})).find(t=>t.url?.includes('/same-day')).id);
+  await worker.evaluate(async tabId=>NotmeGuard.recheck(await chrome.tabs.get(tabId)),activeId);
+  await wait(async()=>page.url().includes('/gate.html')&&await page.locator('#retry').isEnabled());
+  assert.equal(formalRequests().length,0);assert.ok(traffic.some(r=>r.path==='/cdn-cgi/trace'));await confirm(page);
+  pass('保护页点击扩展图标可手动重新检查，不复用当天结果');
 
   traffic.length = 0;
   const another = await context.newPage();

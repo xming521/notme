@@ -260,6 +260,8 @@ self.notmePrepareEnvironment = async (network, settings, selection, onExit) => {
 importScripts('lib/guard.js');
 
 async function openEnvironmentPage(tab) {
+  if (await NotmeGuard.openReview(tab.id)) return;
+  if (await NotmeGuard.recheck(tab)) return;
   const page = chrome.runtime.getURL('gate.html');
   if (tab.url?.startsWith(page)) return;
   const existing = (await chrome.tabs.query({ url: page + '*' })).find(item => item.url === page + '?settings');
