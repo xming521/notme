@@ -193,7 +193,7 @@ test('manifest includes timezone helper before MAIN-world injector', () => {
   const manifest = require(path.join(__dirname, '..', 'manifest.json'));
   const mainScript = manifest.content_scripts.find((script) => script.world === 'MAIN');
   assert(mainScript, 'MAIN world content script is missing');
-  eq(mainScript.js, ['lib/timezone.js', 'content-inject.js']);
+  eq(mainScript.js, ['lib/timezone.js', 'lib/identity.js', 'content-inject.js']);
   assert(manifest.permissions.includes('declarativeNetRequest'), 'DNR permission is required for Accept-Language');
 });
 

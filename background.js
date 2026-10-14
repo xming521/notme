@@ -10,7 +10,7 @@
  *    *outgoing* HTTP header matches the spoofed language, not just navigator.
  *  - Refresh on install / startup and on demand (one-tap re-detect).
  */
-importScripts('lib/geo.js', 'lib/providers.js', 'lib/locale.js', 'lib/tzdata.js');
+importScripts('lib/geo.js', 'lib/providers.js', 'lib/locale.js', 'lib/tzdata.js', 'lib/identity.js');
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS = {
   langEnabled: true,      // spoof navigator.language / Intl locale + Accept-Language header
   webrtcProtect: true,    // force WebRTC through the proxy so it can't leak the real IP
   fontEnabled: true,      // hide OS/region-revealing CJK fonts from width probing
+  identityEnabled: false, // browser/device masking on other sites; protected sites always use it
   workerEnabled: false,   // (experimental) spoof inside Web Workers — off by default:
                           // rewriting a worker through a blob can break WASM/bundled
                           // workers that rely on self.location. Opt in if you need it.
@@ -31,6 +32,10 @@ const DEFAULT_SETTINGS = {
 const ALARM = 'refresh';
 const AL_RULE_ID = 9001;           // global Accept-Language rule (when langEnabled)
 const AL_ANTHROPIC_RULE_ID = 9002; // always-on rule for Anthropic and the verification sites
+const IDENTITY_RULE_ID = 9003;
+const IDENTITY_TARGET_RULE_ID = 9004;
+const IDENTITY_INITIATOR_RULE_ID = 9005;
+const IDENTITY_PROFILE = NotmeIdentity.fromNavigator(typeof navigator !== 'undefined' ? navigator : {});
 // Anthropic properties and the verification sites get the spoofed Accept-Language
 // regardless of the language toggle (requestDomains also matches subdomains).
 const ANTHROPIC_DOMAINS = ['anthropic.com', 'claude.ai', 'claude.com', 'fuck-claude.app', 'fuck-claude.vercel.app'];
@@ -59,27 +64,34 @@ async function patchState(patch) {
   await chrome.storage.local.set({ state: { ...(state || {}), ...patch } });
 }
 
-/** Push / clear the dynamic Accept-Language rule. No-op if DNR is unavailable. */
+/** Synchronize language and identity rules, even before IP detection succeeds. */
 async function syncHeaderRule(settings, override) {
+  await chrome.storage.local.set({ identityProfile: IDENTITY_PROFILE });
   if (!chrome.declarativeNetRequest) return;
   try {
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [AL_RULE_ID, AL_ANTHROPIC_RULE_ID],
-    });
     const al = override && override.acceptLanguage;
-    if (!al) return; // nothing to enforce yet
-    const action = {
-      type: 'modifyHeaders',
-      requestHeaders: [{ header: 'accept-language', operation: 'set', value: al }],
-    };
     const rules = [];
-    // Global rule, gated by the language toggle.
-    if (settings && settings.langEnabled) {
-      rules.push({ id: AL_RULE_ID, priority: 1, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
+    if (al) {
+      const action = {
+        type: 'modifyHeaders',
+        requestHeaders: [{ header: 'accept-language', operation: 'set', value: al }],
+      };
+      if (settings && settings.langEnabled) {
+        rules.push({ id: AL_RULE_ID, priority: 1, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
+      }
+      rules.push({ id: AL_ANTHROPIC_RULE_ID, priority: 2, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
     }
-    // Always-on rule for Anthropic and the verification sites, independent of the toggle.
-    rules.push({ id: AL_ANTHROPIC_RULE_ID, priority: 2, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
-    await chrome.declarativeNetRequest.updateDynamicRules({ addRules: rules });
+    const action = { type: 'modifyHeaders', requestHeaders: NotmeIdentity.requestHeaders(IDENTITY_PROFILE) };
+    if (settings && settings.identityEnabled) {
+      rules.push({ id: IDENTITY_RULE_ID, priority: 1, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
+    }
+    rules.push({ id: IDENTITY_TARGET_RULE_ID, priority: 2, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
+    // Cover third-party requests sent by protected pages as well as requests to them.
+    rules.push({ id: IDENTITY_INITIATOR_RULE_ID, priority: 2, action, condition: { initiatorDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [AL_RULE_ID, AL_ANTHROPIC_RULE_ID, IDENTITY_RULE_ID, IDENTITY_TARGET_RULE_ID, IDENTITY_INITIATOR_RULE_ID],
+      addRules: rules,
+    });
   } catch (_) { /* DNR may be unavailable on some builds; fail soft */ }
 }
 
@@ -210,9 +222,10 @@ async function ensureAlarm() {
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const { settings } = await chrome.storage.local.get('settings');
+  const { settings, override } = await chrome.storage.local.get(['settings', 'override']);
   if (!settings) await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   await ensureAlarm();
+  await syncHeaderRule(await getSettings(), override);
   await syncWebRTC(await getSettings());
   await refresh();
 });

@@ -17,6 +17,7 @@ The extension currently spoofs:
   - the numeric multi-arg constructor, offset-less `Date.parse` / `new Date(string)`, and `Date()` called as a function
 - default `Intl.DateTimeFormat` timezone (injected even when a locale is supplied)
 - `navigator.language` and `navigator.languages`
+- page `navigator.userAgent`, `appVersion`, `platform`, `vendor`, and UA-CH browser brands/device model, with matching outgoing identity headers
 - default locale for `Intl.DateTimeFormat`, `NumberFormat`, `Collator`, `RelativeTimeFormat`, `PluralRules`, `ListFormat`, `DisplayNames`, `Segmenter`, `DurationFormat`
 - `Number`/`Array`/`BigInt.prototype.toLocaleString`
 - outgoing `Accept-Language` header on all resource types via Chrome `declarativeNetRequest`
@@ -78,6 +79,37 @@ The wrappers share one source of truth in `lib/timezone.js`:
 
 Each Date wrapper is installed once and consults the live override state on every call, so toggling a switch in the popup takes effect without reloading the page and wrappers never stack. When a toggle is off (or override data hasn't arrived) every wrapper delegates to the captured native method.
 
+## Browser and device identity
+
+`lib/identity.js` builds one ordinary Chrome/Chromium profile from the original
+UA's Chromium version and coarse OS family, using generic OS/device details.
+The service worker stores that profile separately from IP overrides. The MAIN
+injector has an immediate local fallback and adopts the stored profile through
+the bridge, so this protection does not wait for IP/geolocation detection.
+
+The injector patches `navigator.userAgent`, `appVersion`, `platform`, and
+`vendor`. It keeps the genuine `NavigatorUAData` object and patches its prototype:
+`brands`, `mobile`, `platform`, `toJSON()`, and `getHighEntropyValues()`.
+`model` becomes empty; browser brands and full-version fields use the shared
+profile. Native hint validation and permission checks run first. Unrelated
+high-entropy fields, such as architecture and platform version, are retained.
+
+Identity masking is forced on for Anthropic and both verification domains,
+including subdomains and inherited-origin blank frames. It defaults off on
+other sites; `identityEnabled` enables it globally. Changing that setting restores
+native reads on ordinary pages without replacing `navigator.userAgentData`.
+
+DNR rules synchronize `User-Agent`, `Sec-CH-UA`, `Sec-CH-UA-Mobile`,
+`Sec-CH-UA-Platform`, `Sec-CH-UA-Model`, `Sec-CH-UA-Full-Version`, and
+`Sec-CH-UA-Full-Version-List`. Protected destinations and requests initiated by
+protected pages are covered; the optional global rule covers other destinations.
+The language and identity rules are updated atomically and are installed on
+extension install/update before network detection begins.
+
+This is page/API/header masking. It does not change the engine, real hardware,
+IP, TLS fingerprint, or JavaScript identity in dedicated/shared/service workers.
+Other extensions and browser policies can compete for request headers.
+
 ## WebRTC
 
 When "Block WebRTC IP leak" is on, the service worker sets
@@ -134,7 +166,7 @@ acts on elements that declare a CJK font inline, so normal layout is untouched.
 ## Always-on protection for Anthropic
 
 Because the motivating concern is Anthropic reading the real OS timezone, the
-timezone / locale / font protections are forced on for Anthropic properties
+timezone / locale / font / browser-device protections are forced on for Anthropic properties
 regardless of the popup toggles:
 
 - **Content script.** `content-inject.js` sets `ON_ANTHROPIC` when
@@ -163,7 +195,7 @@ extension by a well-known global or attribute.
 
 ## Limitations
 
-- This is browser-surface alignment, not a full anti-fingerprinting system (canvas image/WebGL/audio/UA are intentionally untouched; only CJK-font width probing is addressed).
+- This is browser-surface alignment, not a full anti-fingerprinting system (canvas image/WebGL/audio/screen are untouched; UA/UA-CH masking covers page APIs and identity headers only).
 - Locale inference is heuristic; provider timezone quality depends on the IP geolocation provider.
 - Worker coverage is limited to classic dedicated workers (see above); Shared/Service Workers and Worklets still read the host zone.
 - Font hiding targets width probes; it does not alter canvas *pixel* readback (`toDataURL`/`getImageData`) fingerprints, and DOM probes that set the font via a CSS class rather than inline style are not covered.
@@ -176,6 +208,7 @@ Run:
 
 ```bash
 node test/run-tests.js
+node test/identity-tests.js
 node --check background.js
 node --check content-inject.js
 node --check content-bridge.js

@@ -23,6 +23,13 @@ to do its job, and only with the minimum information required.
    purely so the popup can display it.
 4. A content script injects the chosen coordinate into `navigator.geolocation`
    on the pages you visit, so pages receive a location consistent with your IP.
+5. Page scripts also apply the configured timezone, locale, and font protections.
+   Browser/device masking presents ordinary Chrome/Chromium brands and an empty
+   device model, using a generic profile for the reported Chromium version and
+   OS family. It is always active on Anthropic and the two verification sites;
+   on other sites it is optional and off by default.
+6. Declarative rules modify language and identity headers on existing website
+   requests. Browser/device masking adds no network endpoints or telemetry.
 
 ## Network requests (the complete list)
 
@@ -44,14 +51,16 @@ yourself and Chrome will warn you before granting them.
 - The detected IP, the chosen override coordinate, and your settings are stored
   **locally** in Chrome's extension storage (`chrome.storage.local`). They never
   leave your machine.
+- A generic browser/device profile is stored locally to keep page API values and
+  outgoing identity headers consistent. The original device model is not stored.
 - Nothing is written to disk outside Chrome's own storage.
 
 ## What the extension does NOT do
 
 - No analytics, no telemetry, no crash reporting, no tracking pixels.
-- No reading of page content, cookies, credentials, or form data. The content
-  script only overrides `navigator.geolocation` and the geolocation permission
-  query — nothing else.
+- No reading of page content, cookies, credentials, or form data. Content scripts
+  read browser API values needed for the profile and patch browser-visible
+  location, timezone, locale, font, and browser/device surfaces.
 - No background data resale or "SDK" of any kind.
 - No account, no sign-up, no login.
 
@@ -62,8 +71,9 @@ websites". That permission is **required** because it must run a content script
 on every site to override the geolocation API — there is no narrower way to do
 this in Chrome. It is also the kind of permission a malicious extension could
 abuse, so you are right to scrutinize it. The source code is short and fully
-auditable; in particular, `content-inject.js` only touches `navigator.geolocation`
-and `navigator.permissions`, and the content scripts never read page content.
+auditable; `content-inject.js` patches browser APIs, and the content scripts
+do not read page content. Host access also lets the declarative header rules
+apply to the selected destinations.
 
 If you are privacy-conscious, you can run it unpacked from source so you can
 read and rebuild it yourself at any time.

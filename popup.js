@@ -62,6 +62,7 @@ function render({ state, override, settings }) {
   $('langEnabled').checked = settings ? settings.langEnabled !== false : true;
   $('webrtcProtect').checked = settings ? settings.webrtcProtect !== false : true;
   $('fontEnabled').checked = settings ? settings.fontEnabled !== false : true;
+  $('identityEnabled').checked = !!(settings && settings.identityEnabled);
   $('workerEnabled').checked = settings ? settings.workerEnabled !== false : true;
   if (settings) {
     $('accuracyM').value = settings.accuracyM;
@@ -108,6 +109,7 @@ bind('tzEnabled', 'tzEnabled');
 bind('langEnabled', 'langEnabled');
 bind('webrtcProtect', 'webrtcProtect');
 bind('fontEnabled', 'fontEnabled');
+bind('identityEnabled', 'identityEnabled');
 bind('workerEnabled', 'workerEnabled');
 bind('accuracyM', 'accuracyM', (v) => Math.max(5, Math.min(500, +v || 30)));
 bind('refreshMinutes', 'refreshMinutes', (v) => Math.max(30, Math.min(10080, +v || 360)));

@@ -80,13 +80,14 @@ flowchart LR
 | **整个 `Date` 本地时间面** | 只有 `getTimezoneOffset` 被改，`getHours`/`toString`/`toLocaleString` 等仍暴露本机时区 | `getTimezoneOffset` **以及** 所有本地 getter/setter、`toString`/`toDateString`/`toTimeString`、`toLocale*`、数字构造函数、无偏移量字符串解析、`Date()` 函数调用，全部按出口 IP 时区（含 DST）计算 |
 | Intl 时区 | 本机系统时区 | 出口 IP 对应时区（即使传入 locale 也注入） |
 | navigator 语言 | 本机语言 | 根据国家码 + 时区推断 |
+| 浏览器 / 设备品牌 | UA、UA-CH 中的国产浏览器标识和设备型号 | 显示普通 Chrome/Chromium 品牌，隐藏设备型号，并同步 `User-Agent` 与相关 Client Hints 请求头；Claude 和两个检测站始终启用，其他网站可选 |
 | Intl 默认 locale | 本机 locale | `DateTimeFormat`/`NumberFormat`/`Collator`/`RelativeTimeFormat`/`PluralRules`/`ListFormat`/`DisplayNames`/`Segmenter`/`DurationFormat` + `Number`/`Array`/`BigInt.toLocaleString` 全部一致 |
 | Accept-Language | 本机请求头语言，且仅主/子框架和 XHR 生效 | 与推断语言一致，覆盖**所有**资源类型（图片/字体/脚本/beacon 等） |
 | WebRTC IP | 可能绕过代理泄露真实 IP | 可选强制走代理（`disable_non_proxied_udp`），ICE candidate 不再泄露真实 IP |
 | 反检测 | `Function.prototype.toString` 可拆穿伪装，`data-notme` 属性残留在 DOM | 伪装函数对 `fn.toString()` 与 `Function.prototype.toString.call(fn)` 都显示 native；payload 改用 `window.postMessage` 传递，不写入 DOM；捕获后立即删除 `window.GeoMirrorTZ` 全局,页面无从探测 |
-| **Anthropic 页面** | —— | 在 `anthropic.com` / `claude.ai` / `claude.com`(含子域)上，时区、locale、字体防护**无视开关强制生效**，并始终发送伪装后的 `Accept-Language` —— 发给 Anthropic 的信息永远不会泄露真实时区/语言 |
+| **Anthropic 页面** | —— | 在 `anthropic.com` / `claude.ai` / `claude.com`（含子域）上，时区、locale、字体和浏览器/设备防护**无视开关强制生效**；时区、语言需要有效数据，浏览器/设备防护立即生效 |
 
-本 fork 还将相同的时区、locale、字体和 `Accept-Language` 强制防护应用到 [`fuck-claude.app`](https://fuck-claude.app/zh/) 和 [`fuck-claude.vercel.app`](https://fuck-claude.vercel.app/zh/)，包含两者的子域名。更新后先重新加载扩展，再刷新检测页面；即使关闭全局时区、语言和字体开关，这些防护仍会在这些网站生效。时区和语言伪装需要有有效的检测或配置数据。Web Worker 伪装与 Claude 一样，仍为可选功能，默认关闭。
+本 fork 还将相同的强制防护应用到 [`fuck-claude.app`](https://fuck-claude.app/zh/) 和 [`fuck-claude.vercel.app`](https://fuck-claude.vercel.app/zh/)，包含两者的子域名。更新后先重新加载扩展，再刷新检测页面。浏览器/设备伪装保留原 UA 中的 Chromium 版本和系统大类，使用通用设备信息，无需等待 IP 定位。其他网站默认关闭，可用 **Mask browser & device on other sites** 开关启用。时区和语言伪装需要有效的检测或配置数据。Web Worker 时区/语言伪装仍为可选功能，默认关闭；Worker 内的 JavaScript 浏览器/设备信息尚未覆盖。
 
 ## 它具体做了什么
 
@@ -201,6 +202,7 @@ navigator.geolocation.getCurrentPosition(console.log, console.error)
 - **Location spoof**：启用/关闭地理位置伪装。
 - **Timezone spoof**：启用/关闭 `Date` 和 `Intl` 时区伪装。
 - **Language spoof**：启用/关闭 `navigator.language(s)`、Intl locale、`Accept-Language`。
+- **Mask browser & device on other sites**：在其他网站也隐藏浏览器/设备品牌，默认关闭。Claude 和两个检测站始终启用；UA、UA-CH、设备型号和身份请求头保持一致。
 - **Block WebRTC IP leak**：强制 WebRTC 走代理，让 ICE candidate 无法暴露真实 IP。默认开启。如果你在没有 UDP 中继的代理上使用视频通话等 WebRTC 功能，可关闭它 —— 开启时这类通话可能连不上，但不会泄露真实 IP。
 - **Hide CJK fonts**：把暴露操作系统/地区的中文字体(微软雅黑、苹方、宋体、黑体…简繁都含)从 canvas `measureText` 和 DOM 宽度探测里剥掉，让它们读起来像"未安装"。默认开启。
 - **Spoof in Web Workers（实验性）**：把时区/语言伪装扩展到专用 Web Worker(指纹站常在 worker 里读真实时区来绕过主线程伪装)。**默认关闭** —— 它通过 blob 垫片重新加载 worker 代码,可能破坏依赖 `self.location` 的 WASM/打包 worker。它会探测 CSP 是否允许 `blob:`,被拦时回退到原生 worker(不会静默弄坏 worker),但请仅在你确实需要 worker 级时区隐藏时开启;某站点 worker 出问题就关掉它。
@@ -231,7 +233,7 @@ cd tools/claude-tz && bash install.sh          # macOS / Linux / WSL（zsh/bash/
 | --- | --- |
 | `storage` | 本地保存设置与计算出的 override。 |
 | `alarms` | 定时刷新出口 IP。 |
-| `declarativeNetRequest` | 设置 outgoing `Accept-Language` 请求头，不读取页面流量。 |
+| `declarativeNetRequest` | 设置 outgoing `Accept-Language`、`User-Agent` 和身份 Client Hints 请求头，不读取请求正文。 |
 | `privacy` | 设置 WebRTC IP 处理策略，防止 WebRTC 泄露真实 IP。可选，由“Block WebRTC IP leak”开关控制。 |
 | `<all_urls>` 内容脚本 | 在普通网页脚本运行前 patch 浏览器 API。 |
 | `host_permissions: <all_urls>` | 两个原因：`declarativeNetRequest` 的 `modifyHeaders` 只对拥有主机权限的站点生效（否则 `Accept-Language` 规则会在你实际访问的网站上被静默跳过）；同时需要能访问 IP / 地理位置 / Overpass / 反地理编码 provider。 |
@@ -278,7 +280,7 @@ cd tools/claude-tz && bash install.sh          # macOS / Linux / WSL（zsh/bash/
 
 ## 局限（如实说明）
 
-- notme 提升的是位置/时区/语言信号的一致性，**不是**完整反指纹系统（刻意不改 canvas、WebGL、字体、音频、屏幕、User-Agent —— 不一致地伪装这些往往更容易被检测）。
+- notme 提升位置/时区/语言和浏览器/设备信号的一致性，**不是**完整反指纹系统。Canvas 像素、WebGL、音频和屏幕信息没有修改；字体保护只覆盖宽度探测。浏览器/设备伪装覆盖页面 API 和身份请求头，不改变真实浏览器内核、硬件、TLS 指纹或 Worker 内的 JavaScript 品牌信息。
 - IP 地理位置本身是近似值；住宅坐标是附近的合理点，不是你的真实地址。
 - 语言推断是启发式的，因为 IP provider 不知道用户真实语言。
 - **Worker 覆盖是部分的。** 经典专用 Web Worker 现在会被伪装(通过 "Spoof in Web Workers" 开关),但 **Shared Worker、Service Worker、Worklet 以及模块(module)worker 仍读取本机时区/语言** —— 内容脚本无法在不破坏它们的前提下 patch 这些作用域。

@@ -18,7 +18,7 @@
   const MARK = '__nmb__';
 
   function publish() {
-    chrome.storage.local.get(['override', 'settings'], (data) => {
+    chrome.storage.local.get(['override', 'settings', 'identityProfile'], (data) => {
       const s = data.settings || {};
       const o = data.override;
       const payload = {
@@ -31,6 +31,8 @@
         tzEnabled: s.tzEnabled !== false,
         langEnabled: s.langEnabled !== false,
         fontEnabled: s.fontEnabled !== false,
+        identityEnabled: s.identityEnabled === true,
+        identityProfile: data.identityProfile || null,
         workerEnabled: s.workerEnabled !== false,
         locale: o ? o.locale : null,
         languages: o ? o.languages : null,
@@ -44,6 +46,6 @@
   });
   publish();
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && (changes.override || changes.settings)) publish();
+    if (area === 'local' && (changes.override || changes.settings || changes.identityProfile)) publish();
   });
 })();

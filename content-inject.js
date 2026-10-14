@@ -35,6 +35,9 @@
  */
 (function () {
   const TZ = window.GeoMirrorTZ || null;
+  const Identity = window.NotmeIdentity || null;
+  const nativeIdentity = Identity ? Identity.fromNavigator(navigator) : null;
+  try { delete window.NotmeIdentity; } catch (_) {}
   // Remove the shared global immediately after capturing it, so a page can't
   // detect the extension via `window.GeoMirrorTZ`. It's captured into TZ above;
   // nothing else references the global (worker patch is self-contained).
@@ -43,9 +46,12 @@
                           // does not cross the isolated→MAIN world boundary)
 
   // Anthropic properties and the verification sites get the same timezone,
-  // locale, and font protection regardless of the corresponding toggles.
+  // locale, font, and identity protection regardless of the corresponding toggles.
   let ON_ANTHROPIC = false;
-  try { ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|fuck-claude\.app|fuck-claude\.vercel\.app)$/i.test(location.hostname || ''); } catch (_) {}
+  try {
+    const host = location.hostname || new URL(window.origin).hostname;
+    ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|fuck-claude\.app|fuck-claude\.vercel\.app)$/i.test(host);
+  } catch (_) {}
 
   // ---------------------------------------------------------------------------
   // Capture pristine natives BEFORE shadowing anything.
@@ -99,6 +105,8 @@
   function langActive() { return !!(cache && cache.locale && (cache.langEnabled || ON_ANTHROPIC)); }
   // Font hiding is IP-independent, so it defaults on before override data arrives.
   function fontActive() { return ON_ANTHROPIC || !cache || cache.fontEnabled !== false; }
+  function identityActive() { return !!(Identity && (ON_ANTHROPIC || (cache && cache.identityEnabled === true))); }
+  function identityProfile() { return (cache && cache.identityProfile) || nativeIdentity; }
   function workerActive() { return !!(cache && cache.workerEnabled !== false && (tzActive() || langActive())); }
 
   // ---------------------------------------------------------------------------
@@ -151,6 +159,51 @@
       return realFnToString.apply(this, arguments);
     });
     try { Function.prototype.toString = fake; } catch (_) {}
+  })();
+
+  // Keep the genuine NavigatorUAData object and native hint validation. Mask the
+  // browser/device fields on its prototype, restoring native reads when inactive.
+  (function installIdentity() {
+    if (!Identity) return;
+    function descriptor(obj, key) {
+      for (let p = obj; p; p = Object.getPrototypeOf(p)) {
+        const d = Object.getOwnPropertyDescriptor(p, key);
+        if (d) return d;
+      }
+      return null;
+    }
+    function getter(obj, key, replacement) {
+      const desc = descriptor(obj, key);
+      if (!desc || !desc.get) return;
+      defineOn(Object.getPrototypeOf(obj), key, makeMethod('get ' + key, 0, function () {
+        const value = desc.get.call(this); // preserve native receiver checks
+        return identityActive() ? replacement(identityProfile()) : value;
+      }));
+    }
+    for (const key of ['userAgent', 'appVersion', 'platform', 'vendor']) {
+      getter(navigator, key, p => p[key]);
+    }
+    let data;
+    try { data = navigator.userAgentData; } catch (_) {}
+    if (!data) return; // don't invent an API on unsupported/insecure contexts
+    const proto = Object.getPrototypeOf(data);
+    getter(data, 'brands', p => Identity.brands(p, false, true));
+    getter(data, 'mobile', p => p.mobile);
+    getter(data, 'platform', p => p.uaPlatform);
+    const realHigh = proto.getHighEntropyValues;
+    if (typeof realHigh === 'function') {
+      proto.getHighEntropyValues = makeMethod('getHighEntropyValues', 1, function () {
+        return realHigh.apply(this, arguments).then(values =>
+          identityActive() ? Identity.highEntropy(identityProfile(), values) : values);
+      });
+    }
+    const realJSON = proto.toJSON;
+    if (typeof realJSON === 'function') {
+      proto.toJSON = makeMethod('toJSON', 0, function () {
+        const value = realJSON.apply(this, arguments);
+        return identityActive() ? Identity.lowEntropy(identityProfile()) : value;
+      });
+    }
   })();
 
   // ---------------------------------------------------------------------------
