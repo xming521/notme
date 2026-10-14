@@ -13,12 +13,11 @@
       <label for="accuracyM">定位精度 <span>米</span></label><input id="accuracyM" type="number" min="5" max="500" step="1">
       <label for="refreshMinutes">自动刷新间隔 <span>分钟</span></label><input id="refreshMinutes" type="number" min="30" max="10080" step="1">
       <label for="ipToken">ipinfo Token <span>可选</span></label><input id="ipToken" type="password" autocomplete="off" spellcheck="false">
-      <label for="otherIdentity">其他网站也隐藏设备信息</label><input id="otherIdentity" type="checkbox">
     </div>
     <p class="hint">这些参数修改后自动保存。手动选择时区时，伪装位置和语言也跟随该时区。</p>
     <dl id="environment-info"></dl>
   </details>
   <p id="error" role="alert"></p><p id="saved" role="status"></p>
   <div class="actions"><button id="confirm" disabled>确认并访问</button><button id="retry" class="secondary" disabled>重新检查</button><button id="save-defaults" class="secondary" disabled>保存为默认</button><button id="close" class="secondary">关闭标签页</button></div>
-  <footer id="scope">当前开关仅用于本次访问；保存为默认后用于后续访问及普通网站（设备标识另见高级设置）。WebRTC 设置影响整个浏览器。再次打开或刷新目标网站需要重新确认。</footer>
+  <footer id="scope">仅对 Anthropic / Claude 网站生效，其他网站保持系统默认。保存为默认只记住下次访问的选择；每次打开或刷新仍需检查并确认。</footer>
 </main><script src="lib/environment.js"></script><script src="lib/tzdata.js"></script><script src="lib/udp.js"></script><script src="gate.js"></script></body></html>

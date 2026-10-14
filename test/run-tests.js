@@ -199,10 +199,10 @@ test('manifest includes timezone helper before MAIN-world injector', () => {
 
 test('manifest grants the host access DNR needs + covers about:blank/srcdoc frames', () => {
   const manifest = require(path.join(__dirname, '..', 'manifest.json'));
-  // DNR modifyHeaders needs host access for the visited site, not just the API domains.
-  assert(manifest.host_permissions.includes('<all_urls>'),
-    'host_permissions must cover visited sites so the Accept-Language rule applies');
-  // WebRTC IP-leak protection needs the privacy API.
+  // Only Anthropic and diagnostic providers need host access.
+  assert(!manifest.host_permissions.includes('<all_urls>'), 'host access must not cover unrelated sites');
+  for (const host of require('../lib/network.js').ROOT_DOMAINS) assert(manifest.host_permissions.includes('*://*.' + host + '/*'));
+  // UDP diagnostics read the privacy policy; upgrades clear the old global setting.
   assert(manifest.permissions.includes('privacy'), 'privacy permission is required for WebRTC protection');
   // Both content scripts must reach about:blank / srcdoc / data: / blob: child frames.
   for (const cs of manifest.content_scripts) {
@@ -211,13 +211,12 @@ test('manifest grants the host access DNR needs + covers about:blank/srcdoc fram
   }
 });
 
-test('background applies Accept-Language to all resource types and blocks WebRTC leaks', () => {
-  const src = require('fs').readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+test('admitted Anthropic headers cover resource types within the domain scope', () => {
+  const src = require('fs').readFileSync(path.join(__dirname, '..', 'lib/guard.js'), 'utf8');
   for (const t of ['script', 'image', 'font', 'media', 'ping', 'stylesheet', 'object']) {
     assert(src.includes(`'${t}'`), `Accept-Language rule must cover the ${t} resource type`);
   }
-  assert(src.includes('disable_non_proxied_udp'), 'WebRTC policy must force non-proxied UDP off');
-  assert(/webrtcProtect:\s*true/.test(src), 'webrtcProtect should default on');
+  assert(src.includes('requestDomains: Network.ROOT_DOMAINS'), 'headers must be scoped to Anthropic domains');
 });
 
 test('Anthropic domains have navigation profile handling', () => {
@@ -225,7 +224,9 @@ test('Anthropic domains have navigation profile handling', () => {
   const bg = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
   const roots = require('../lib/network.js').ROOT_DOMAINS;
   assert(['anthropic.com', 'claude.ai', 'claude.com'].every(domain => roots.includes(domain)), 'Anthropic domains must be listed');
-  assert(bg.includes('AL_ANTHROPIC_RULE_ID') && bg.includes('requestDomains'), 'always-on Anthropic Accept-Language rule required');
+  for (const script of require('../manifest.json').content_scripts) {
+    eq(script.matches, roots.map(host => '*://*.' + host + '/*'));
+  }
   const inj = fs.readFileSync(path.join(__dirname, '..', 'content-inject.js'), 'utf8');
   assert(/ON_ANTHROPIC/.test(inj), 'injector must recognize Anthropic domains');
   assert(/delete window\.GeoMirrorTZ/.test(inj), 'the shared global must be deleted after capture');

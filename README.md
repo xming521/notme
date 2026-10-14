@@ -1,6 +1,6 @@
 # notme
 
-> Make your browser profile match your visible IP: geolocation, timezone, language, and `Accept-Language` — automatically, on every page.
+> Make your browser profile match your visible IP: geolocation, timezone, language, and `Accept-Language` — only on approved Anthropic / Claude pages.
 
 notme is a Chrome Manifest V3 extension for people who use proxies, VPNs, remote desktops, or regional network exits and want the browser-visible environment to be internally consistent.
 
@@ -12,9 +12,9 @@ notme is a Chrome Manifest V3 extension for people who use proxies, VPNs, remote
 
 Opening or reloading an Anthropic URL first redirects to a local environment selection page. Choose **Use notme spoofing**, **Use system defaults**, or set each surface independently. The static rules block the site's main HTML and subresources until the checks pass **and you click Confirm**. A previous visit or another tab does not authorize a new navigation.
 
-The toolbar and navigation gate now share one Chinese environment page. All seven choices and the timezone selector are together; network details and advanced preferences start collapsed, while blocking failures expand automatically. Timezone, latency threshold, accuracy, refresh interval and optional token changes are saved immediately and trigger fresh checks. **Save as default** remembers the seven choices for future visits and ordinary sites; ordinary-site identity masking stays a separate advanced preference. Saving settings does not authorize a navigation.
+The toolbar and navigation gate now share one Chinese environment page. All seven choices and the timezone selector are together; network details and advanced preferences start collapsed, while blocking failures expand automatically. Timezone, latency threshold, accuracy, refresh interval and optional token changes are saved immediately and trigger fresh checks. **Save as default** remembers the seven choices only for future Anthropic visits. Saving settings does not authorize a navigation.
 
-The protected roots are `anthropic.com`, `claude.ai`, `claude.com`, `claude.app`, `claudeusercontent.com`, `claudemcpcontent.com`, and `claude.site`, including all their subdomains. The two fingerprint verification sites keep their existing profile protection without this navigation gate.
+The protected roots are `anthropic.com`, `claude.ai`, `claude.com`, `claude.app`, `claudeusercontent.com`, `claudemcpcontent.com`, and `claude.site`, including all their subdomains. Other sites, including fingerprint verification sites, retain their native environment.
 
 Each check makes three cookie-free HTTPS requests to the actual destination's `/cdn-cgi/trace`. It checks connectivity, latency, a stable exit IP, and the inherited `verify-networking` country restrictions (`CN`, `HK`, `KP`, `CU`, `IR`, `SY`, `RU`, `BY`). The observed destination IP is then used for geolocation; a generic IP lookup cannot stand in for the destination's exit when a proxy routes hosts differently. Unknown essential HTTPS results and warnings keep the Confirm button disabled. Only the selected spoofed surfaces require profile data; selecting system defaults does not force the browser to match the exit timezone. Confirmation repeats the network probe and rejects changed settings or a changed exit. Checks expire after one minute.
 
@@ -51,16 +51,16 @@ notme detects your visible **exit IP**, derives a plausible browser profile from
 | **Whole `Date` local-time surface** | DST-aware IANA logic drives `getTimezoneOffset()` **and** every local getter (`getHours`/`getDate`/`getDay`/`getMonth`/`getFullYear`/…), the local setters, `toString`/`toDateString`/`toTimeString`, `toLocaleString`/`toLocaleDateString`/`toLocaleTimeString`, the numeric multi-arg constructor, offset-less `Date.parse`, and `Date()` called as a function — so no `Date` method contradicts the spoofed offset. |
 | Intl timezone | Spoofs default `Intl.DateTimeFormat` timezone and `resolvedOptions().timeZone` (even when a locale is passed). |
 | Browser language | Spoofs `navigator.language` and `navigator.languages`. |
-| Browser / device brands | Presents ordinary Chrome/Chromium UA and UA-CH brands, masks the device model, and synchronizes `User-Agent` / identity client-hint request headers. Always active on protected sites; optional elsewhere. |
+| Browser / device brands | Presents ordinary Chrome/Chromium UA and UA-CH brands, masks the device model, and synchronizes `User-Agent` / identity client-hint request headers. Controlled by the per-visit choice on Anthropic pages only. |
 | Intl locale | Spoofs the default locale for `DateTimeFormat`, `NumberFormat`, `Collator`, `RelativeTimeFormat`, `PluralRules`, `ListFormat`, `DisplayNames`, `Segmenter`, `DurationFormat`, plus `Number`/`Array`/`BigInt.prototype.toLocaleString`. |
-| Request language | Sets the outgoing `Accept-Language` header on **all** request types via Chrome `declarativeNetRequest`. |
-| WebRTC IP leak | Optionally forces WebRTC through the proxy (`chrome.privacy` → `disable_non_proxied_udp`) so ICE candidates can't reveal the real, proxy-bypassing IP. |
+| Request language | Sets the outgoing `Accept-Language` header only for approved Anthropic destinations, on **all** request types via Chrome `declarativeNetRequest`. |
+| WebRTC IP leak | Optionally blocks `RTCPeerConnection` and its legacy alias only on Anthropic pages. This can disable WebRTC audio/video features on those pages. |
 | Web Workers | Optionally (experimental, off by default) extends timezone + locale spoofing into dedicated Web Workers (where fingerprinters read the real timezone to bypass main-thread spoofing). |
 | CJK fonts | Optionally hides OS/region-revealing Chinese fonts (Microsoft YaHei, PingFang, SimSun, …, Simplified + Traditional) from canvas `measureText` and DOM width probes. |
 | Anti-detection | Spoofed functions report native to both `fn.toString()` and the intrinsic `Function.prototype.toString.call(fn)`; the override payload is not left in the DOM, and no global (like `window.GeoMirrorTZ`) is left for a page to probe. |
 | **Anthropic pages** | The seven protected roots and their subdomains receive environment selection, network checks and explicit confirmation. Each surface can use notme spoofing or the system default. |
 
-This fork also applies the same always-on protections to [`fuck-claude.app`](https://fuck-claude.app/zh/) and [`fuck-claude.vercel.app`](https://fuck-claude.vercel.app/zh/), including their subdomains. Reload the extension and test page after updating. Browser/device masking uses the reported Chromium version and a generic device profile for the same OS family, without waiting for IP detection. On other sites it is off by default; enable **Mask browser & device on other sites** to extend it globally. Timezone and language spoofing require valid detected or configured override data. Web Worker timezone/locale spoofing remains optional and off by default; worker JavaScript identity is not covered.
+Only the seven Anthropic roots and their subdomains receive content scripts and selected spoofing. Ordinary sites and fingerprint test sites remain native. Web Worker spoofing is optional and off by default.
 
 The goal is simple: if your IP looks like Tokyo, the browser should not still look like Shanghai, Los Angeles, or Berlin — and no single `Date` or `Intl` call should quietly give it away.
 
@@ -174,7 +174,7 @@ navigator.geolocation.getCurrentPosition(console.log, console.error)
 
 Also check DevTools → Network → request headers and confirm `Accept-Language` matches the spoofed locale.
 
-Useful public checks:
+Public checks show the native environment because they are outside the protection scope. To inspect a spoofed profile, run the commands above in an approved Anthropic page. Public comparison pages:
 
 - https://browserleaks.com/geo
 - https://browserleaks.com/javascript
@@ -182,18 +182,20 @@ Useful public checks:
 
 ## Settings
 
+All choices apply only to Anthropic visits. Updating to 1.8.2 clears the legacy global header rules and WebRTC control. Reload affected open pages once to discard old page wrappers; the fixed extension ID stays unchanged.
+
 - **Location spoof** — enable/disable geolocation override.
 - **Timezone spoof** — enable/disable the `Date` and `Intl` timezone override.
 - **Language spoof** — enable/disable `navigator.language(s)`, Intl locale, and `Accept-Language` header override.
-- **Block WebRTC IP leak** — force WebRTC through the proxy so ICE candidates can't expose the real IP. Default on. Turn it off if you use WebRTC calls (e.g. video chat) over a proxy that has no UDP relay — with it on, such calls may fail to connect rather than leak.
+- **Block WebRTC IP leak** — disables WebRTC connections only on the selected Anthropic page. Default on; select system default to use its native WebRTC features. This may affect WebRTC audio/video on that page.
 - **Hide CJK fonts** — strip region-revealing Chinese fonts from canvas/DOM width probes so they read as not-installed. Default on.
-- **Mask browser & device on other sites** — show ordinary Chrome/Chromium brands and an empty device model through UA / UA-CH, with matching request headers. Default off for other sites; always active on the two verification sites. Anthropic pages use the per-visit selection. Reload pages after updating the extension.
+- **Browser and device identity** — masks UA / UA-CH and the device model only for the selected Anthropic visit.
 - **Spoof in Web Workers** *(experimental)* — extend timezone/locale spoofing into dedicated Web Workers. **Default off**, because it reloads worker code through a blob shim which can break WASM/bundled workers that rely on `self.location`. It probes for CSP `blob:` support and falls back to a native worker when blocked (so it won't silently kill workers), but enable it only if you need worker-level timezone hiding, and turn it off if a site's worker misbehaves.
-- **Force timezone** — pick a zone to **override exit-IP detection entirely**: the timezone, locale, and a representative coordinate are forced to that zone regardless of where the exit IP resolves (and regardless of whether detection succeeds). Use this to present a fixed non-China profile. Leave it on *Auto — use exit IP* to mirror the detected exit location instead. **Caveat:** forcing a timezone that differs from your real exit IP only hides it from *browser-side* checks (e.g. the fuck-claude test reads `Intl` timezone, which this spoofs); a service that reads your exit IP server-side can still see the IP↔timezone mismatch — the real fix for that is a proxy that exits where you want to appear.
+- **Force timezone** — pick a zone to **override exit-IP detection entirely**: the timezone, locale, and a representative coordinate are forced to that zone regardless of where the exit IP resolves (and regardless of whether detection succeeds). Use this to present a fixed non-China profile. Leave it on *Auto — use exit IP* to mirror the detected exit location instead. **Caveat:** forcing a timezone that differs from your real exit IP only hides it from *browser-side* checks (e.g. an Anthropic page reads the `Intl` timezone); a service that reads your exit IP server-side can still see the IP↔timezone mismatch — the real fix for that is a proxy that exits where you want to appear.
 - **Reported accuracy (m)** — reported GPS accuracy, default 30 m.
 - **Auto-refresh interval (minutes)** — how often notme re-detects the exit IP.
 - **ipinfo.io token (optional)** — improves fallback reliability if you have a token.
-- **Network warning threshold (ms)** — maximum average probe latency for Anthropic admission; default 500 ms. WebRTC is a browser-wide setting: the last confirmed choice affects other tabs. Its per-visit switch applies protection or relinquishes notme's control; other surfaces stay specific to the approved tab.
+- **Network warning threshold (ms)** — maximum average probe latency for Anthropic admission; default 500 ms.
 
 ## Claude Code (terminal): a separate timezone channel
 
@@ -225,9 +227,9 @@ IP). Which channel you need:
 | `storage` | Save settings and computed overrides locally. |
 | `alarms` | Schedule periodic exit-IP refresh. |
 | `declarativeNetRequest` | Set the outgoing `Accept-Language` header without reading page traffic. |
-| `privacy` | Set the WebRTC IP-handling policy so WebRTC can't leak the real IP. Optional — controlled by the "Block WebRTC IP leak" toggle. |
-| `<all_urls>` content script | Patch browser APIs on normal web pages before page scripts run. |
-| `host_permissions: <all_urls>` | Required for two reasons: `declarativeNetRequest` `modifyHeaders` only applies to sites the extension has host access to (without it the `Accept-Language` rule is silently skipped on the sites you actually visit), and the IP/geolocation/Overpass/reverse-geocode providers must be reachable. |
+| `privacy` | Read the existing policy for UDP diagnostics and release old versions' browser-wide WebRTC override. New protections stay in the selected page. |
+| Anthropic-only content scripts | Patch APIs only on the seven protected roots and their subdomains, including inherited-origin frames. |
+| Scoped host permissions | Access Anthropic destinations and the listed IP/geolocation/map providers. Other website origins are excluded. |
 
 ## If you do not want to install this extension
 
@@ -263,9 +265,9 @@ Requirements:
 These were real gaps in earlier versions and are now closed:
 
 - **`Date` self-contradiction.** Previously only `getTimezoneOffset()` and `Intl.DateTimeFormat` were spoofed, so `new Date().getHours()`, `.toString()` (`… GMT+0800 (China Standard Time)`), `.toLocaleString()`, `Number.prototype.toLocaleString`, and most of the `Intl.*` family still leaked the host machine's timezone/locale — a one-line cross-check unmasked the spoof. The whole `Date` local-time surface and every locale-aware `Intl` constructor are now virtualized in the exit-IP zone.
-- **`Accept-Language` was silently not applied.** `declarativeNetRequest` `modifyHeaders` needs host access to the visited site; the old manifest only listed the IP-API domains, so the header rule was skipped on real sites. `host_permissions` is now `<all_urls>`, and the rule covers **all** resource types (previously only main-frame/sub-frame/XHR — images, fonts, scripts, and beacons leaked the real language).
+- **`Accept-Language` was silently not applied.** `declarativeNetRequest` `modifyHeaders` needs host access to the visited site; the old manifest only listed the IP-API domains, so the header rule was skipped on real sites. `host_permissions` covers only Anthropic and diagnostic providers, and the rule covers **all** resource types (previously only main-frame/sub-frame/XHR — images, fonts, scripts, and beacons leaked the real language).
 - **`Intl.DateTimeFormat` dropped the timezone** in the no-locale path (a positional-argument bug), leaking the host timezone whenever timezone spoofing ran with language spoofing off. Fixed.
-- **WebRTC could leak the real IP** around the proxy. Now optionally forced through the proxy.
+- **WebRTC could leak the real IP** around the proxy. Now optionally disabled only on the selected Anthropic page.
 - **Spoof detection.** `Function.prototype.toString.call(fn)` used to return the wrapper source; the override payload sat readable in `<html data-notme>`; `permissions.query` returned a plain object. All fixed.
 - **Opaque-origin frames.** `about:blank` / `srcdoc` / `data:` / `blob:` child frames are now patched (`match_origin_as_fallback`).
 

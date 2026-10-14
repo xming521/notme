@@ -21,14 +21,14 @@ listed below, using the data needed for those checks.
 3. It optionally asks BigDataCloud for a human-readable address of that point,
    purely so the environment page can display it.
 4. A content script injects the chosen coordinate into `navigator.geolocation`
-   on the pages you visit, so pages receive a location consistent with your IP.
+   only on selected Anthropic pages. Other sites remain native.
 5. Page scripts also apply the configured timezone, locale, and font protections.
    Browser/device masking presents ordinary Chrome/Chromium brands and an empty
    device model, using a generic profile for the reported Chromium version and
-   OS family. Anthropic pages use the per-visit choices; the two verification
-   sites retain always-on masking. On other sites it is optional and off by default.
-6. Declarative rules modify language and identity headers on existing website
-   requests. Browser/device masking adds no network endpoints or telemetry.
+   OS family. Only Anthropic pages use the per-visit choices. Other sites,
+   including verification sites, retain native APIs.
+6. Declarative rules modify language and identity headers only on approved
+   Anthropic destination requests. Browser/device masking adds no network endpoints or telemetry.
 7. Before an Anthropic navigation, the local check page requests the target
    host's `/cdn-cgi/trace` three times without cookies, credentials or a referrer.
    Confirmation repeats this probe. The target's reported exit IP is used for an
@@ -56,7 +56,8 @@ listed below, using the data needed for those checks.
 These are the background endpoints used by the extension. Explicit destination-IP
 lookups send that observed IP to `ipwho.is`, `ipapi.co`, or `ipinfo.io`; these
 services may see a different source IP under split routing. Host access is
-declared as `<all_urls>` for the content scripts and request rules.
+limited to the seven Anthropic roots and listed IP/map providers. Content
+scripts match only Anthropic origins and inherited-origin frames.
 
 ## What is stored, and where
 
@@ -69,8 +70,8 @@ declared as `<all_urls>` for the content scripts and request rules.
 - The pending target URL, check results and each tab's checked profile are held
   in `chrome.storage.session` for the browser session. They are removed when the
   tab closes or leaves the protected site; they are not uploaded as history.
-  Per-visit spoof/default flags are stored with that profile. The latest confirmed
-  WebRTC choice is stored in session storage because Chrome applies it browser-wide.
+  Per-visit spoof/default flags, including page-local WebRTC protection, are
+  stored with that profile. No browser-wide WebRTC override is applied.
   The UDP diagnostic retains only the resulting public-address summary, not SDP
   or host/mDNS candidate addresses. HTTP/3 detection reuses the target trace and
   adds no endpoint.
@@ -89,14 +90,11 @@ declared as `<all_urls>` for the content scripts and request rules.
 
 ## A note on trust
 
-This extension requests the permission "read and change all your data on all
-websites". That permission is **required** because it must run a content script
-on every site to override the geolocation API — there is no narrower way to do
-this in Chrome. It is also the kind of permission a malicious extension could
-abuse, so you are right to scrutinize it. The source code is short and fully
-auditable; `content-inject.js` patches browser APIs, and the content scripts
-do not read page content. Host access also lets the declarative header rules
-apply to the selected destinations.
+Content scripts run only on the seven Anthropic roots and their subdomains.
+Host permissions additionally allow the public IP/geolocation/map endpoints.
+The scripts do not read page contents. Header rules apply only to approved
+Anthropic destinations. On upgrade, old global header rules and notme's old
+WebRTC privacy override are removed.
 
 `tabs` and `webNavigation` associate the pending URL and admission rules with
 the correct tab and navigation. The guard does not inspect page contents.

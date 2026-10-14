@@ -5,7 +5,7 @@
  *  - Pick a nearby residential street as the override coordinate.
  *  - Resolve the exit IP's timezone (already returned by the IP providers) and
  *    infer a matching locale (country code → language, timezone as tie-breaker).
- *  - Store everything so the content scripts can apply it to every page.
+ *  - Store everything for the selected Anthropic page.
  *  - Push an Accept-Language header rule via declarativeNetRequest so the
  *    *outgoing* HTTP header matches the spoofed language, not just navigator.
  *  - Refresh on install / startup and on demand (one-tap re-detect).
@@ -19,9 +19,9 @@ const DEFAULT_SETTINGS = {
   ipToken: '',            // optional ipinfo.io token for better fallback
   tzEnabled: true,        // spoof Date/Intl timezone to match exit IP
   langEnabled: true,      // spoof navigator.language / Intl locale + Accept-Language header
-  webrtcProtect: true,    // force WebRTC through the proxy so it can't leak the real IP
+  webrtcProtect: true,    // disable WebRTC connections only on the selected page
   fontEnabled: true,      // hide OS/region-revealing CJK fonts from width probing
-  identityEnabled: false, // browser/device masking on other sites; protected sites always use it
+  identityEnabled: false, // legacy preference; per-visit selection controls identity
   workerEnabled: false,   // (experimental) spoof inside Web Workers — off by default:
                           // rewriting a worker through a blob can break WASM/bundled
                           // workers that rely on self.location. Opt in if you need it.
@@ -31,25 +31,11 @@ const DEFAULT_SETTINGS = {
 };
 
 const ALARM = 'refresh';
-const AL_RULE_ID = 9001;           // global Accept-Language rule (when langEnabled)
-const AL_ANTHROPIC_RULE_ID = 9002; // always-on rule for Anthropic and the verification sites
-const IDENTITY_RULE_ID = 9003;
-const IDENTITY_TARGET_RULE_ID = 9004;
-const IDENTITY_INITIATOR_RULE_ID = 9005;
+const LEGACY_HEADER_RULE_IDS = [9001, 9002, 9003, 9004, 9005];
 const IDENTITY_PROFILE = NotmeIdentity.fromNavigator(typeof navigator !== 'undefined' ? navigator : {});
-// Anthropic properties and the verification sites get the spoofed Accept-Language
-// regardless of the language toggle (requestDomains also matches subdomains).
-const ANTHROPIC_DOMAINS = [...NotmeNetwork.ROOT_DOMAINS, 'fuck-claude.app', 'fuck-claude.vercel.app'];
-
-// Apply the Accept-Language override to every request type. Omitting resource
-// types (or listing only a subset) leaves images/scripts/fonts/beacons sending
-// the real host Accept-Language, which contradicts the spoofed navigator.language.
-const AL_RESOURCE_TYPES = [
-  'main_frame', 'sub_frame', 'stylesheet', 'script', 'image', 'font',
-  'object', 'xmlhttprequest', 'ping', 'csp_report', 'media', 'other',
-];
 
 async function getSettings() {
+  await legacyCleanup;
   const { settings } = await chrome.storage.local.get('settings');
   return { ...DEFAULT_SETTINGS, ...(settings || {}) };
 }
@@ -65,57 +51,13 @@ async function patchState(patch) {
   await chrome.storage.local.set({ state: { ...(state || {}), ...patch } });
 }
 
-/** Synchronize language and identity rules, even before IP detection succeeds. */
-async function syncHeaderRule(settings, override) {
+async function clearLegacyEffects() {
   await chrome.storage.local.set({ identityProfile: IDENTITY_PROFILE });
-  if (!chrome.declarativeNetRequest) return;
-  try {
-    const al = override && override.acceptLanguage;
-    const rules = [];
-    if (al) {
-      const action = {
-        type: 'modifyHeaders',
-        requestHeaders: [{ header: 'accept-language', operation: 'set', value: al }],
-      };
-      if (settings && settings.langEnabled) {
-        rules.push({ id: AL_RULE_ID, priority: 1000, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
-      }
-      rules.push({ id: AL_ANTHROPIC_RULE_ID, priority: 1001, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
-    }
-    const action = { type: 'modifyHeaders', requestHeaders: NotmeIdentity.requestHeaders(IDENTITY_PROFILE) };
-    if (settings && settings.identityEnabled) {
-      rules.push({ id: IDENTITY_RULE_ID, priority: 1000, action, condition: { urlFilter: '*', resourceTypes: AL_RESOURCE_TYPES } });
-    }
-    rules.push({ id: IDENTITY_TARGET_RULE_ID, priority: 1001, action, condition: { requestDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
-    // Cover third-party requests sent by protected pages as well as requests to them.
-    rules.push({ id: IDENTITY_INITIATOR_RULE_ID, priority: 1001, action, condition: { initiatorDomains: ANTHROPIC_DOMAINS, resourceTypes: AL_RESOURCE_TYPES } });
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [AL_RULE_ID, AL_ANTHROPIC_RULE_ID, IDENTITY_RULE_ID, IDENTITY_TARGET_RULE_ID, IDENTITY_INITIATOR_RULE_ID],
-      addRules: rules,
-    });
-  } catch (_) { /* DNR may be unavailable on some builds; fail soft */ }
+  await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: LEGACY_HEADER_RULE_IDS, addRules: [] });
+  await chrome.storage.session.remove('guardWebRTCProtect');
+  if (chrome.privacy?.network?.webRTCIPHandlingPolicy) await chrome.privacy.network.webRTCIPHandlingPolicy.clear({});
 }
-
-/**
- * Force WebRTC through the proxy so ICE candidates can't leak the machine's real
- * (proxy-bypassing) public/LAN IP — which would geolocate to the host city and
- * blow the whole "match the exit IP" premise. Extension-controlled privacy
- * settings auto-revert when GeoMirror is disabled or removed. Fails soft where
- * the privacy API is unavailable.
- */
-async function syncWebRTC(settings) {
-  try {
-    if (!(chrome.privacy && chrome.privacy.network && chrome.privacy.network.webRTCIPHandlingPolicy)) return;
-    const selected = await chrome.storage.session.get('guardWebRTCProtect');
-    const on = selected.guardWebRTCProtect ?? !!(settings && settings.webrtcProtect);
-    if (on) {
-      await chrome.privacy.network.webRTCIPHandlingPolicy.set({ value: 'disable_non_proxied_udp' });
-    } else {
-      // Relinquish control rather than pinning 'default' under this extension.
-      await chrome.privacy.network.webRTCIPHandlingPolicy.clear({});
-    }
-  } catch (_) { /* privacy API may be restricted; fail soft */ }
-}
+const legacyCleanup = clearLegacyEffects();
 
 /** Build an override from the user's manual timezone (fallback when the exit-IP
  *  path can't confirm a timezone). Coordinates come from the timezone's profile
@@ -168,8 +110,7 @@ async function refresh() {
       }
     } catch (_) {}
     await chrome.storage.local.set({ override, state });
-    await syncHeaderRule(s, override);
-    await syncWebRTC(s);
+
     return;
   }
 
@@ -210,8 +151,7 @@ async function refresh() {
       lastUpdated: now, lastError: null,
     };
     await chrome.storage.local.set({ override, state });
-    await syncHeaderRule(s, override);
-    await syncWebRTC(s);
+
   } catch (e) {
     await patchState({ status: 'error', lastError: String((e && e.message) || e), lastUpdated: now });
   }
@@ -224,22 +164,16 @@ async function ensureAlarm() {
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const { settings, override } = await chrome.storage.local.get(['settings', 'override']);
+  const { settings } = await chrome.storage.local.get('settings');
   if (!settings) await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   await ensureAlarm();
-  await syncHeaderRule(await getSettings(), override);
-  await syncWebRTC(await getSettings());
+
   await refresh();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await ensureAlarm();
-  const { state, override, settings } = await chrome.storage.local.get(['state', 'override', 'settings']);
-  // Re-assert the header rule + WebRTC policy on startup (extension-controlled
-  // settings and dynamic rules aren't guaranteed to persist across restarts).
-  const merged = { ...DEFAULT_SETTINGS, ...(settings || {}) };
-  await syncHeaderRule(merged, override);
-  await syncWebRTC(merged);
+  const { state } = await chrome.storage.local.get('state');
   const s = await getSettings();
   const age = state && state.lastUpdated ? Date.now() - state.lastUpdated : Infinity;
   if (!state || age > s.refreshMinutes * 60000) await refresh();
@@ -255,11 +189,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   (async () => {
+    await legacyCleanup;
     if (msg && msg.type === 'REFRESH') {
       await refresh();
     } else if (msg && msg.type === 'SET_SETTINGS') {
       const next = await saveSettings(msg.patch || {});
-      if (msg.patch && 'webrtcProtect' in msg.patch) await chrome.storage.session.remove('guardWebRTCProtect');
       const { override } = await chrome.storage.local.get('override');
       if (override) {
         override.enabled = next.enabled;
@@ -268,10 +202,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         override.langEnabled = next.langEnabled;
         await chrome.storage.local.set({ override });
       }
-      // Toggling language spoofing changes whether the header rule is active;
-      // toggling location/WebRTC protection changes the WebRTC policy.
-      await syncHeaderRule(next, override);
-      await syncWebRTC(next);
+
       if (msg.patch && 'refreshMinutes' in msg.patch) await ensureAlarm();
     }
     // Return a fresh snapshot for any message (covers GET_STATE too).
@@ -283,14 +214,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 self.notmeGuardSettings = getSettings;
 self.notmeGuardIdentity = () => IDENTITY_PROFILE;
-self.notmeGuardWebRTC = async (protect) => {
-  await chrome.storage.session.set({ guardWebRTCProtect: protect });
-  await syncWebRTC(await getSettings());
-  const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
-  if (protect ? policy.value !== 'disable_non_proxied_udp' : policy.levelOfControl === 'controlled_by_this_extension') {
-    throw new Error('无法应用所选 WebRTC 设置，请检查浏览器或其他扩展的控制');
-  }
-};
 self.notmePrepareEnvironment = async (network, settings, selection) => {
   let location = null;
   let profile = {};
@@ -316,12 +239,8 @@ self.notmePrepareEnvironment = async (network, settings, selection) => {
   const checks = NotmeEnvironment.checks(network, location, settings, selection);
   if (selection.langEnabled && !profile.locale) checks.push({ name: '伪装语言', status: 'fail', detail: '无法生成所选环境的语言' });
   if (selection.enabled && profile.lat == null) checks.push({ name: '伪装位置', status: 'fail', detail: '未取得可用的位置坐标' });
-  if (selection.webrtcProtect) {
-    const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
-    const available = policy.value === 'disable_non_proxied_udp'
-      || !['not_controllable', 'controlled_by_other_extensions'].includes(policy.levelOfControl);
-    checks.push({ name: 'WebRTC 控制', status: available ? 'ok' : 'fail', detail: '确认时启用代理 UDP 保护（浏览器全局）' });
-  }
+  if (selection.webrtcProtect) checks.push({ name: 'WebRTC 保护', status: 'ok',
+    detail: '确认后仅在此网站禁用 WebRTC 连接，其他网站保持默认' });
   if (checks.some(check => check.status !== 'ok')) return { checks, override: null };
   const override = {
     ...profile, ...selection, guardSelection: true, acc: settings.accuracyM, ts: Date.now(), identityProfile: IDENTITY_PROFILE,

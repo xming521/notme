@@ -2,7 +2,7 @@
 
 ## Purpose
 
-notme aligns the browser-visible profile with the current proxy/VPN exit IP. It does not change the network IP itself; it changes browser surfaces that otherwise commonly contradict the proxy location.
+notme aligns the browser-visible profile on selected Anthropic pages with the current proxy/VPN exit IP. It does not change the network IP itself; it changes browser surfaces that otherwise commonly contradict the proxy location.
 
 The extension currently spoofs:
 
@@ -21,7 +21,7 @@ The extension currently spoofs:
 - default locale for `Intl.DateTimeFormat`, `NumberFormat`, `Collator`, `RelativeTimeFormat`, `PluralRules`, `ListFormat`, `DisplayNames`, `Segmenter`, `DurationFormat`
 - `Number`/`Array`/`BigInt.prototype.toLocaleString`
 - outgoing `Accept-Language` header on all resource types via Chrome `declarativeNetRequest`
-- WebRTC IP-handling policy (optional, via `chrome.privacy`) so ICE candidates can't bypass the proxy
+- WebRTC connections disabled only on the selected Anthropic page (optional); other origins retain native WebRTC
 - timezone + locale inside dedicated Web Workers (optional; see below)
 - CJK font width probing on canvas `measureText` and DOM `getBoundingClientRect`/`getClientRects`/`offsetWidth`/`offsetHeight` (optional; see below)
 - `Function.prototype.toString` (so spoofed functions read as native)
@@ -36,8 +36,7 @@ it edits defaults and cannot authorize a site visit. Advanced fields save immedi
 changing admission parameters invalidates the displayed check and runs a fresh one.
 Check deduplication includes the settings fingerprint to avoid reusing a probe started
 with old parameters. `settings.guardDefaults` stores the seven selected defaults;
-saving also updates ordinary-site flags except identity, which has a separate control.
-Saving WebRTC defaults changes the browser-wide policy. The all-spoof and all-native
+saving never updates other sites. WebRTC protection is page-local. The all-spoof and all-native
 presets remain available even after custom defaults have been saved.
 
 ### Anthropic navigation admission
@@ -79,17 +78,16 @@ host and extension initiator. `onCommitted` removes it. The tab retains a
 subresource allow rule and, when needed, a profile header rule until its next navigation.
 Main-frame rules and header rules explicitly enumerate resource types: Chrome
 excludes main frames when the types are omitted. Header modification priorities
-for the per-tab profile are above the allow rules. Those allow rules are above
-the generic profile headers, suppressing generic overrides so default selections
-keep native headers, including requests to third-party resources.
+for the per-tab profile are above the allow rules. The header rules match only protected destinations in the admitted tab; other
+destinations keep native headers even during navigation away from Anthropic.
 
 The gate offers the existing notme preset, an all-native preset, and seven
 independent switches. `lib/environment.js` normalizes those choices; only chosen
 location/timezone/language surfaces need geographic profile data. Forced timezones
-use `buildManualOverride`, as ordinary notme does. A selection signature rejects
+use `buildManualOverride` from the cached notme workflow. A selection signature rejects
 outdated checks when the user changes controls during a probe. WebRTC uses
-Chrome's browser-wide privacy setting, applied on confirmation; the latest
-confirmed setting persists for the browser session unless changed by saving defaults in the environment page.
+a constructor guard only on Anthropic pages. It blocks connections when selected;
+other origins retain native WebRTC. Old browser-wide control is cleared on startup.
 
 For the first protected document, the gate carries the checked profile in a URL
 fragment. `content-inject.js` consumes it synchronously at `document_start` and
@@ -180,18 +178,14 @@ The injector patches `navigator.userAgent`, `appVersion`, `platform`, and
 profile. Native hint validation and permission checks run first. Unrelated
 high-entropy fields, such as architecture and platform version, are retained.
 
-Identity masking follows the per-visit choice for Anthropic and remains forced
-on for both verification domains, including their subdomains and inherited-origin
-blank frames. It defaults off on other sites; `identityEnabled` enables it globally.
-Changing that setting restores
-native reads on ordinary pages without replacing `navigator.userAgentData`.
+Identity masking follows the per-visit choice only on Anthropic origins and
+inherited-origin frames. Ordinary sites and verification sites are not injected.
 
 DNR rules synchronize `User-Agent`, `Sec-CH-UA`, `Sec-CH-UA-Mobile`,
 `Sec-CH-UA-Platform`, `Sec-CH-UA-Model`, `Sec-CH-UA-Full-Version`, and
-`Sec-CH-UA-Full-Version-List`. Protected destinations and requests initiated by
-protected pages are covered; the optional global rule covers other destinations.
-The language and identity rules are updated atomically and are installed on
-extension install/update before network detection begins.
+`Sec-CH-UA-Full-Version-List`. Only protected destinations in an admitted tab are covered. There are no global
+header rules. Startup removes old rule IDs 9001–9005 and clears the old WebRTC
+privacy override before settings are used.
 
 This is page/API/header masking. It does not change the engine, real hardware,
 IP, TLS fingerprint, or JavaScript identity in dedicated/shared/service workers.
@@ -199,11 +193,13 @@ Other extensions and browser policies can compete for request headers.
 
 ## WebRTC
 
-When "Block WebRTC IP leak" is on, the service worker sets
-`chrome.privacy.network.webRTCIPHandlingPolicy` to `disable_non_proxied_udp`.
-This forces WebRTC to use the proxy path; if the proxy has no UDP relay, WebRTC
-media fails to connect rather than leaking the real IP. Extension-controlled
-privacy settings revert automatically when notme is disabled or removed.
+When selected, the protected page guards `RTCPeerConnection` and its legacy
+alias, rejecting construction with `NotAllowedError`. This disables that page's
+WebRTC audio/video connections. The guard waits for the per-visit profile in
+inherited frames by refusing construction while it is unknown; selecting native
+restores normal construction once the profile arrives. Other origins do not run
+this code. The privacy API is used only to read the current UDP policy and clear
+legacy browser-wide control.
 
 ## Web Worker spoofing ("Spoof in Web Workers" toggle — experimental, default OFF)
 
@@ -258,16 +254,11 @@ switches can restore any surface to the browser default:
 - **Content script.** `content-inject.js` sets `ON_ANTHROPIC` when
   `location.hostname` matches one of the seven protected roots or a subdomain.
   `tzActive()` / `langActive()` / `fontActive()` use that tab's selected flags.
-- **Header.** `background.js` installs a second, higher-priority
-  `declarativeNetRequest` rule (`requestDomains` = those domains) that always
-  sets the spoofed `Accept-Language` on requests to Anthropic, independent of the
-  language toggle. An admitted tab's higher-priority rules suppress this generic
-  rule and set only headers explicitly selected for spoofing.
+- **Header.** Per-tab rules modify only requests to the seven protected roots.
+  Only explicitly selected language and identity values are applied.
 
-This fork includes `fuck-claude.app` and `fuck-claude.vercel.app`, including their
-subdomains, in both the content-script hostname check and the header rule's
-`requestDomains`, so both verification sites retain their always-on behavior.
-They do not use the navigation gate. Unrelated sites follow the global toggles.
+Ordinary sites and verification sites retain native APIs and headers. The bridge
+publishes only the tab's admitted profile, never the global cached environment.
 
 The experimental Web Worker feature is *not* force-enabled on Anthropic
 (claude.ai is worker-heavy and the blob rewrite could break it); the main-thread

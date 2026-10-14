@@ -45,14 +45,12 @@
   const MARK = '__nmb__'; // neutral window.postMessage marker (CustomEvent detail
                           // does not cross the isolated→MAIN world boundary)
 
-  // Guarded sites use the per-visit selection; verification sites keep their forced protection.
   let ON_ANTHROPIC = false;
-  let ON_GUARDED = false;
   try {
     const host = location.hostname || new URL(window.origin).hostname;
-    ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|claude\.app|claudeusercontent\.com|claudemcpcontent\.com|claude\.site|fuck-claude\.app|fuck-claude\.vercel\.app)\.?$/i.test(host);
-    ON_GUARDED = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|claude\.app|claudeusercontent\.com|claudemcpcontent\.com|claude\.site)\.?$/i.test(host);
+    ON_ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com|claude\.app|claudeusercontent\.com|claudemcpcontent\.com|claude\.site)\.?$/i.test(host);
   } catch (_) {}
+  if (!ON_ANTHROPIC) return;
 
   // ---------------------------------------------------------------------------
   // Capture pristine natives BEFORE shadowing anything.
@@ -107,7 +105,7 @@
     } catch (_) {}
   }
   if (cache?.guardSelection && !cache.enabled && !cache.tzEnabled && !cache.langEnabled
-    && !cache.identityEnabled && !cache.fontEnabled) return;
+    && !cache.identityEnabled && !cache.fontEnabled && !cache.workerEnabled && !cache.webrtcProtect) return;
   let readyResolve;
   const ready = new Promise((r) => { readyResolve = r; });
   if (cache) readyResolve();
@@ -115,14 +113,12 @@
   // The three surfaces are independent toggles (Location / Timezone / Language),
   // matching the popup — timezone and language don't depend on the geolocation
   // ("Location spoof") switch.
-  const forced = ON_ANTHROPIC && !ON_GUARDED;
-  function tzActive() { return !!(cache && cache.timezone && TZ && (cache.tzEnabled || forced)); }
-  function langActive() { return !!(cache && cache.locale && (cache.langEnabled || forced)); }
-  // Guarded frames start native until their per-visit profile arrives.
-  function fontActive() { return forced || (!cache ? !ON_GUARDED : cache.fontEnabled !== false); }
-  function identityActive() { return !!(Identity && (forced || (cache && cache.identityEnabled === true))); }
+  function tzActive() { return !!(cache && cache.timezone && TZ && cache.tzEnabled); }
+  function langActive() { return !!(cache && cache.locale && cache.langEnabled); }
+  function fontActive() { return !!(cache && cache.fontEnabled); }
+  function identityActive() { return !!(Identity && cache && cache.identityEnabled); }
   function identityProfile() { return (cache && cache.identityProfile) || nativeIdentity; }
-  function workerActive() { return !!(cache && cache.workerEnabled !== false && (tzActive() || langActive())); }
+  function workerActive() { return !!(cache && cache.workerEnabled && (tzActive() || langActive())); }
 
   // ---------------------------------------------------------------------------
   // Native-identity helpers.
@@ -226,6 +222,23 @@
   // stays the real object (correct instanceof / no own properties / no fake
   // accessor). Methods delegate to native when location spoofing is off.
   // ---------------------------------------------------------------------------
+  const peerConstructors = new WeakMap();
+  for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection']) {
+    const NativePeer = window[name];
+    if (!NativePeer) continue;
+    let wrapped = peerConstructors.get(NativePeer.prototype);
+    if (!wrapped) {
+      wrapped = new Proxy(NativePeer, { construct(target, args, newTarget) {
+        if (!cache || cache.webrtcProtect) throw new DOMException('本站已禁用 WebRTC 连接', 'NotAllowedError');
+        return Reflect.construct(target, args, newTarget);
+      } });
+      spoofedNames.set(wrapped, realFnToString.call(NativePeer));
+      Object.defineProperty(NativePeer.prototype, 'constructor', { value: wrapped });
+      peerConstructors.set(NativePeer.prototype, wrapped);
+    }
+    window[name] = wrapped;
+  }
+
   const watchHandlers = {};
   let watchCounter = 0;
 

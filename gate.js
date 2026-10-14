@@ -70,7 +70,7 @@ function showChoices(profile) {
     enabled: '使用伪装地区附近的位置',
     tzEnabled: profile?.timezone || settings.manualTz || '跟随出口 IP', langEnabled: profile?.locale || '跟随伪装地区',
     identityEnabled: '显示 Chrome，隐藏设备型号', fontEnabled: '隐藏可用于识别地区的中文字体',
-    workerEnabled: '后台脚本也使用所选时区与语言', webrtcProtect: '阻止 UDP 绕过代理',
+    workerEnabled: '后台脚本也使用所选时区与语言', webrtcProtect: '禁用本站的 WebRTC 连接',
   };
   for (const { key } of surfaces) $(`#detail-${key}`).textContent = selected[key] ? spoofed[key] : original[key];
   $('#timezone-setting').hidden = !selected.tzEnabled;
@@ -186,17 +186,14 @@ function bindPreferences() {
       updatePreference({ [key]: value });
     };
   }
-  $('#otherIdentity').checked = settings.identityEnabled;
-  $('#otherIdentity').onchange = event => updatePreference({ identityEnabled: event.target.checked });
 }
 $('#retry').onclick = () => settingsOnly ? updatePreference({}, true) : check();
 $('#preset-spoof').onclick = () => { setSelection(defaults); $('#saved').textContent = ''; check(); };
 $('#preset-native').onclick = () => { setSelection(Object.fromEntries(surfaces.map(({ key }) => [key, false]))); $('#saved').textContent = ''; check(); };
 $('#save-defaults').onclick = async () => {
   const chosen = selection();
-  const { identityEnabled, ...ordinary } = chosen;
   $('#save-defaults').disabled = true;
-  await updatePreference({ ...ordinary, guardDefaults: chosen });
+  await updatePreference({ guardDefaults: chosen });
   if (!$('#error').textContent) $('#saved').textContent = '已保存默认环境；之后打开网站会预选这套开关，仍需检查并确认。';
   $('#save-defaults').disabled = false;
 };
@@ -227,7 +224,7 @@ $('#close').onclick = () => chrome.tabs.remove(tabId);
   if (settingsOnly) {
     $('#heading').textContent = '设置默认环境。'; $('#eyebrow').textContent = '与访问前的环境选择使用同一页面';
     $('#confirm').hidden = true; $('#diagnostics').hidden = true; $('#retry').textContent = '刷新环境';
-    $('#scope').textContent = '保存后用于下次访问及普通网站；其他网站的设备伪装单独在高级设置中控制。WebRTC 设置影响整个浏览器。';
+    $('#scope').textContent = '保存后仅用于下一次 Anthropic / Claude 访问，其他网站保持系统默认。';
   } else $('#target').textContent = view.target;
   await check();
 })().catch(error => { $('#error').textContent = error.message; });

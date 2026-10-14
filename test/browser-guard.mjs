@@ -57,7 +57,7 @@ const server = createServer({ key: await readFile(join(temporary, 'key.pem')), c
     response.end(`<!doctype html><html><head><link rel="icon" href="data:,"><script>
       window.first={language:navigator.language,zone:Intl.DateTimeFormat().resolvedOptions().timeZone,ua:navigator.userAgent,hash:location.hash};
       window.addEventListener('pageshow',e=>document.documentElement.dataset.persisted=e.persisted);
-      </script><script src="https://assets.claude.ai/asset.js"></script></head><body><h1 id="formal">FORMAL CONTENT</h1></body></html>`);
+      </script><script src="https://${Network.protectedHost(`https://${host}/`) ? 'assets.claude.ai' : 'assets.outside.test'}/asset.js"></script></head><body><h1 id="formal">FORMAL CONTENT</h1></body></html>`);
   }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -99,6 +99,16 @@ async function executable() {
 let context;
 let control;
 let page;
+async function redirectStun(context) {
+  await context.addInitScript(({port}) => {
+    const Native=window.RTCPeerConnection;
+    if (Native) window.RTCPeerConnection=new Proxy(Native,{construct(target,args){
+      const config={...args[0]};
+      if(config.iceServers?.some(server=>String(server.urls).includes('stun.cloudflare.com'))) config.iceServers=[{urls:`stun:127.0.0.1:${port}`}];
+      return Reflect.construct(target,[config]);
+    }});
+  }, {port:stun.address().port});
+}
 try {
   const options = {
     executablePath: await executable(), headless: true, viewport: { width: 1100, height: 1050 },
@@ -113,18 +123,14 @@ try {
   await context.addCookies([{name:'seedLogin',value:'synthetic',domain:'cached.claude.ai',path:'/',secure:true,expires:Date.now()/1000+86400}]);
   await seed.goto('https://outside.test/seed');
   await seed.evaluate(async () => {const cache=await caches.open('unrelated');await cache.put('/keep',new Response('synthetic'));});
+  const baselineWorker=await seed.evaluate(()=>new Promise((resolve,reject)=>{
+    const worker=new Worker('/worker.js');worker.onmessage=event=>{resolve(event.data);worker.terminate();};worker.onerror=reject;
+  }));
   await context.close();
   context = await chromium.launchPersistentContext(join(temporary, 'profile'), {
     ...options,args:[...options.args,`--disable-extensions-except=${resolve('.')}`,`--load-extension=${resolve('.')}`],
   });
-  await context.addInitScript(({port}) => {
-    const Native=window.RTCPeerConnection;
-    if (Native) window.RTCPeerConnection=new Proxy(Native,{construct(target,args){
-      const config={...args[0]};
-      if(config.iceServers?.some(server=>String(server.urls).includes('stun.cloudflare.com'))) config.iceServers=[{urls:`stun:127.0.0.1:${port}`}];
-      return Reflect.construct(target,[config]);
-    }});
-  }, {port:stun.address().port});
+  await redirectStun(context);
   const worker = context.serviceWorkers().find(worker => worker.url().startsWith('chrome-extension:'))
     || await context.waitForEvent('serviceworker', { predicate: worker => worker.url().startsWith('chrome-extension:') });
   const id = new URL(worker.url()).hostname;
@@ -160,13 +166,30 @@ try {
     const worker = new Worker('/worker.js'); worker.onmessage = event => { resolve(event.data); worker.terminate(); }; worker.onerror = reject;
   }));
   const fontWidths = page => page.evaluate(async () => {
-    const face = await new FontFace('Microsoft YaHei', 'url(https://assets.claude.ai/fixture.ttf)').load(); document.fonts.add(face);
+    const face = await new FontFace('Microsoft YaHei', 'url('+location.origin+'/fixture.ttf)').load(); document.fonts.add(face);
     const context = document.createElement('canvas').getContext('2d');
     context.font = '30px "Microsoft YaHei", monospace'; const custom = context.measureText('Wiiii').width;
     context.font = '30px monospace'; return { custom, generic: context.measureText('Wiiii').width };
   });
   const pass = name => { results.push(name); console.log('PASS ' + name); };
   const formalRequests = () => traffic.filter(item => Network.protectedHost(`https://${item.host}/`) && item.path !== '/cdn-cgi/trace');
+  const rtc = page => page.evaluate(() => {
+    try { const peer=new RTCPeerConnection({iceServers:[]});peer.createDataChannel('test');peer.close();return 'allowed'; }
+    catch(error) { return error.name; }
+  });
+  const verifyOrdinary = async (page,url) => {
+    await page.goto(url);await page.locator('#formal').waitFor();
+    await wait(async()=>await page.evaluate(()=>window.assetLoaded===true));
+    assert.deepEqual(await page.evaluate(()=>({language:navigator.language,zone:Intl.DateTimeFormat().resolvedOptions().timeZone,ua:navigator.userAgent})),original);
+    assert.deepEqual(await page.evaluate(()=>({language:window.first.language,zone:window.first.zone,ua:window.first.ua})),original);
+    const target=new URL(url);const header=traffic.findLast(item=>item.host===target.hostname&&item.path===target.pathname);
+    assert.ok(header.language.startsWith(original.language));assert.equal(header.ua,original.ua);
+    assert.deepEqual(await location(page),{lat:31.23,lon:121.47});
+    assert.deepEqual(await workerProfile(page),baselineWorker);
+    const widths=await fontWidths(page);assert.notEqual(widths.custom,widths.generic);
+    assert.equal(await rtc(page),'allowed');
+    assert.equal(await page.evaluate(()=>('GeoMirrorTZ' in window)||('NotmeIdentity' in window)),false);
+  };
   const checkDetails = async page => {
     if (!await page.locator('#diagnostics').evaluate(node => node.open)) await page.locator('#diagnostics > summary').click();
     return page.locator('#checks').innerText();
@@ -209,7 +232,17 @@ try {
   assert.ok(!first.ua.includes('HeadlessChrome'));
   assert.equal(formalRequests().find(item => item.path === '/page').language, 'en-US,en;q=0.9');
   assert.ok(await page.evaluate(() => window.assetLoaded));
+  assert.equal(await rtc(page),'NotAllowedError');
+  assert.equal(await page.evaluate(()=>{try{new RTCPeerConnection.prototype.constructor({iceServers:[]});return 'allowed';}catch(error){return error.name;}}),'NotAllowedError');
+  assert.notEqual((await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.get({}))).levelOfControl,'controlled_by_this_extension');
   pass('点击确认后才加载网站；第一个内联脚本已获得正确时区、语言与标识，HTTP 头同步');
+
+  const outside=await context.newPage();
+  for(const host of ['outside.test','claude.ai.evil.test','fakeanthropic.com','fuck-claude.app','fuck-claude.vercel.app']) {
+    await verifyOrdinary(outside,`https://${host}/native-scope`);
+  }
+  await outside.close();
+  pass('普通网站、仿冒域名和检测站的语言、时区、设备、GPS、字体、Worker、WebRTC 及请求头都保持原生');
 
   traffic.length = 0;
   await page.reload();
@@ -301,6 +334,7 @@ try {
   const nativeWorker = await workerProfile(another);
   const nativeFont = await fontWidths(another); assert.notEqual(nativeFont.custom, nativeFont.generic);
   assert.notEqual((await control.evaluate(() => chrome.privacy.network.webRTCIPHandlingPolicy.get({}))).levelOfControl, 'controlled_by_this_extension');
+  assert.equal(await rtc(another),'allowed');
   pass('全部系统默认保留主页面与空白子框架的原生环境、GPS、字体、Worker 和请求头，WebRTC 还原默认');
 
   const cases = [
@@ -316,7 +350,7 @@ try {
     }],
     ['字体', async page => { const width = await fontWidths(page); assert.notEqual(width.custom, width.generic); }],
     ['后台脚本（Web Worker）', async page => assert.deepEqual(await workerProfile(page), nativeWorker)],
-    ['IP 防泄漏（WebRTC）', async () => assert.notEqual((await control.evaluate(() => chrome.privacy.network.webRTCIPHandlingPolicy.get({}))).levelOfControl, 'controlled_by_this_extension')],
+    ['IP 防泄漏（WebRTC）', async page => assert.equal(await rtc(page),'allowed')],
   ];
   for (const [label, verify] of cases) {
     traffic.length = 0; await openGate(another, 'https://claude.ai/mixed');
@@ -336,12 +370,13 @@ try {
   pass('主动开启 Worker 伪装后使用所选时区语言；字体伪装能隐藏已加载的地区字体');
 
   const beforeRestricted=udpRequests;
+  await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.set({value:'disable_non_proxied_udp'}));
   await openGate(another,'https://claude.ai/udp-protected');
   assert.ok((await checkDetails(another)).includes('未发送 STUN'));
   assert.equal(udpRequests,beforeRestricted);assert.equal(await another.locator('#confirm').isEnabled(),true);
   pass('当前 WebRTC 保护限制 UDP 时显示未测，且不发送任何 STUN 包');
 
-  await send({type:'SET_SETTINGS',patch:{webrtcProtect:false}});
+  await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.clear({}));
   traffic.length=0;await openGate(another,'https://claude.ai/udp-match');
   assert.ok((await checkDetails(another)).includes('与目标 HTTPS 出口一致'));
   assert.ok(udpRequests>beforeRestricted);assert.equal(formalRequests().length,0);
@@ -406,8 +441,12 @@ try {
   assert.deepEqual(await remembered.evaluate(() => ({language:window.first.language,zone:window.first.zone,ua:window.first.ua})),original);
   await preset(another,'使用 notme 伪装');
   assert.equal(await another.locator('#choices input[value="spoof"]:checked').count(),6);
+  await another.locator('#save-defaults').click();
+  await wait(async()=>await another.locator('#retry').isEnabled());
+  const afterSave=await context.newPage();await verifyOrdinary(afterSave,'https://outside.test/after-save');await afterSave.close();
   await remembered.close();
   pass('保存默认选择后新访问预选相同开关，仍需确认；伪装预设可恢复，系统默认不强制伪装');
+  pass('保存伪装默认环境也不改普通网站的任何浏览器信号');
 
   const reset=Object.fromEntries(['enabled','tzEnabled','langEnabled','fontEnabled','webrtcProtect'].map(key => [key,true]));
   await send({type:'SET_SETTINGS',patch:{...reset,manualTz:'',accuracyM:30,guardDefaults:null,workerEnabled:false}});
@@ -416,6 +455,16 @@ try {
   const savedDefaults=Object.fromEntries(['enabled','tzEnabled','langEnabled','identityEnabled','fontEnabled','workerEnabled','webrtcProtect']
     .map(key=>[key,!['workerEnabled','identityEnabled'].includes(key)]));
   await send({type:'SET_SETTINGS',patch:{guardDefaults:savedDefaults}});
+  await control.evaluate(async()=>{
+    const {settings}=await chrome.storage.local.get('settings');
+    await chrome.storage.local.set({settings:{...settings,enabled:true,tzEnabled:true,langEnabled:true,fontEnabled:true,identityEnabled:true,workerEnabled:true,webrtcProtect:true}});
+    await chrome.storage.session.set({guardWebRTCProtect:true});
+    await chrome.privacy.network.webRTCIPHandlingPolicy.set({value:'disable_non_proxied_udp'});
+    await chrome.declarativeNetRequest.updateDynamicRules({addRules:[9001,9002,9003,9004,9005].map(id=>({
+      id,priority:1000,action:{type:'modifyHeaders',requestHeaders:[{header:'accept-language',operation:'set',value:'en-US,en;q=0.9'}]},
+      condition:{urlFilter:'*',resourceTypes:['main_frame','sub_frame','xmlhttprequest']},
+    }))});
+  });
   const relocated=join(temporary,'moved-extension');await mkdir(relocated);
   for(const file of ['manifest.json','background.js','content-bridge.js','content-inject.js','guard-rules.json','gate.html','gate.css','gate.js','lib','icons']) {
     await cp(resolve(file),join(relocated,file),{recursive:true});
@@ -424,12 +473,17 @@ try {
   context=await chromium.launchPersistentContext(join(temporary,'profile'),{
     ...options,args:[...options.args,`--disable-extensions-except=${relocated}`,`--load-extension=${relocated}`],
   });
+  await redirectStun(context);await context.grantPermissions(['geolocation']);
   const movedWorker=context.serviceWorkers().find(worker=>worker.url().startsWith('chrome-extension:'))
     || await context.waitForEvent('serviceworker',{predicate:worker=>worker.url().startsWith('chrome-extension:')});
   assert.equal(new URL(movedWorker.url()).hostname,id);
   control=await context.newPage();await control.goto(`chrome-extension://${id}/gate.html?settings`);
   const movedSettings=(await send({type:'GET_STATE'})).settings;
   assert.equal(movedSettings.accuracyM,45);assert.deepEqual(movedSettings.guardDefaults,savedDefaults);
+  assert.equal((await control.evaluate(()=>chrome.declarativeNetRequest.getDynamicRules())).some(rule=>[9001,9002,9003,9004,9005].includes(rule.id)),false);
+  assert.notEqual((await control.evaluate(()=>chrome.privacy.network.webRTCIPHandlingPolicy.get({}))).levelOfControl,'controlled_by_this_extension');
+  const restored=await context.newPage();await verifyOrdinary(restored,'https://outside.test/after-upgrade');await restored.close();
+  pass('升级清除旧全局语言规则和 WebRTC 策略；旧的全开设置保留时普通网站仍完全原生');
   const movedPage=await context.newPage();traffic.length=0;
   await openGate(movedPage,'https://claude.ai/relocated');
   assert.equal(await movedPage.locator('input[name="identityEnabled"][value="native"]').isChecked(),true);
@@ -437,6 +491,8 @@ try {
   assert.equal((await movedPage.evaluate(()=>window.first)).zone,'America/Los_Angeles');
   assert.equal((await movedPage.evaluate(()=>window.first)).ua,original.ua);
   pass('换目录加载保持固定 ID、定位精度与默认选择；新目录的访问拦截和确认流程正常');
+  await verifyOrdinary(movedPage,'https://outside.test/leave-anthropic');
+  pass('同一标签页从 Anthropic 转到普通网站，主请求和页面都恢复原生语言、时区及设备');
 
   await mkdir('test-results', { recursive: true });
   await writeFile('test-results/browser-guard.json', JSON.stringify({ browser: context.browser()?.version(), results, count: results.length }, null, 2));
