@@ -246,6 +246,7 @@ function render(view) {
   const ready = Boolean(view.report?.ready);
   const warnings = view.report?.checks.some(check => check.status === 'warn');
   $('#confirm').disabled = !ready;
+  $('#summary').hidden = false;
   $('#summary').textContent = ready ? warnings
     ? '可以访问，网络有提示，请核对上方结果。' : '环境已就绪，点击“确认并访问”进入网站。'
     : '暂时无法访问，请核对网络结果和所选环境。';
@@ -254,6 +255,7 @@ function render(view) {
 function renderSettings(snapshot) {
   showChoices(snapshot.override); showInfo(snapshot);
   $('#target').textContent = [snapshot.state?.ipCity, snapshot.override?.timezone, snapshot.override?.locale].filter(Boolean).join(' · ');
+  $('#summary').hidden = false;
   $('#summary').textContent = ['ok', 'manual'].includes(snapshot.state?.status)
     ? '选择默认环境，点击“保存为默认”生效。打开目标网站时仍会检查并确认。'
     : '自动检测尚未成功，可以刷新环境或选择手动时区。';
@@ -285,7 +287,7 @@ async function check() {
   const current = ++revision;
   $('#exit-alert').hidden = true;
   busy = true; $('#confirm').disabled = true; $('#retry').disabled = true; $('#error').textContent = '';
-  showChoices(); $('#summary').textContent = settingsOnly ? '正在读取环境…' : '正在检查网络与所选环境…';
+  showChoices(); $('#summary').hidden = true;
   if (!settingsOnly) {
     $('#network-status').textContent = '正在检查'; $('#network-status').className = 'status-badge info';
     $('#network-elapsed').textContent = '';
@@ -358,6 +360,7 @@ $('#save-defaults').onclick = async () => {
 };
 $('#confirm').onclick = async () => {
   if (busy || settingsOnly) return;
+  $('#error').textContent = '';
   busy = true; $('#confirm').disabled = true; $('#confirm').textContent = '正在进入…';
   let progress;
   const controls = document.querySelectorAll('#choices input, #choices select, #advanced input, .presets button, #save-defaults, #retry');

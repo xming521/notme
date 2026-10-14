@@ -248,11 +248,18 @@ try {
   pass('检查通过后仍等待明确确认，正式 HTML / 脚本 / 资源请求数为零');
   assert.equal(await page.locator('#check-progress').getAttribute('data-running'),'false');
   assert.match(await page.locator('#progress-label').textContent(),/检查完成/);
+  const pendingTabId=await page.evaluate(async()=> (await chrome.tabs.getCurrent()).id);
+  await worker.evaluate(async tabId=>{
+    const view=await NotmeGuard.message({type:'NOTME_GUARD_STATE',tabId},{id:chrome.runtime.id,url:chrome.runtime.getURL('gate.html')});
+    const entries=Object.entries(view.selection).reverse();
+    for(const key of Object.keys(view.selection)) delete view.selection[key];
+    Object.assign(view.selection,Object.fromEntries(entries));
+  },pendingTabId);
   traffic.length=0;const udpBeforeQuickConfirm=udpRequests;
   await confirm(page);
   assert.equal(traffic.some(item=>item.path==='/cdn-cgi/trace'),false);
   assert.equal(udpRequests,udpBeforeQuickConfirm);
-  pass('检查完成 15 秒内确认直接进入，不重复 HTTPS 或 UDP 探测');
+  pass('检查完成 15 秒内确认直接进入，不重复 HTTPS 或 UDP 探测，后台恢复后属性顺序变化不会误报环境变化');
   const first = await page.evaluate(() => window.first);
   assert.equal(first.language, 'en-US'); assert.equal(first.zone, 'America/Los_Angeles'); assert.equal(first.hash, '#original');
   assert.ok(!first.ua.includes('HeadlessChrome'));

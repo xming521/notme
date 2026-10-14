@@ -338,3 +338,11 @@ test('UDP 探测收集响应后关闭连接，超时与异常不会误报成功'
   assert.equal((await UDP.probe({PeerConnection:Silent,timeoutMs:5})).state,'unknown');
   assert.equal((await UDP.probe({PeerConnection:class {constructor(){throw new Error('unavailable');}}})).state,'unknown');
 });
+
+test('环境比较忽略属性顺序，但每一项实际变化仍使检查失效', () => {
+  const original = Environment.defaultSelection({});
+  const reordered = Object.fromEntries(Object.entries(original).reverse());
+  assert.equal(Environment.sameSelection(original, reordered), true);
+  for (const {key} of Environment.SURFACES) assert.equal(Environment.sameSelection(original, {...reordered, [key]: !original[key]}), false);
+  assert.equal(Environment.sameSelection(original, {...reordered, geoMode: 'native'}), false);
+});
