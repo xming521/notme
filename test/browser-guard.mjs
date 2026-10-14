@@ -23,7 +23,9 @@ const server = createServer({ key: await readFile(join(temporary, 'key.pem')), c
   traffic.push({ host, path: url.pathname, cookie: request.headers.cookie || '', language: request.headers['accept-language'] || '', ua: request.headers['user-agent'] || '' });
   response.setHeader('Cache-Control', url.pathname === '/cached' ? 'public, max-age=3600' : 'no-store');
   const policy = policies.get(host) || {};
-  if (url.pathname === '/cdn-cgi/trace') {
+  if (host === 'outside.test' && url.pathname === '/oauth-redirect') {
+    response.writeHead(302,{Location:'https://claude.ai/oauth/redirected?code=synthetic%26code&state=synthetic%3Dstate&extra=1'});response.end();
+  } else if (url.pathname === '/cdn-cgi/trace') {
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Content-Type', 'text/plain');
     response.setHeader('Alt-Svc','h3=":443"; ma=3600');
@@ -366,6 +368,13 @@ try {
   assert.equal(formalRequests().length,0);
   await confirm(diagnostic);
   assert.ok(traffic.some(r=>r.host==='claude.ai'&&r.path==='/oauth/callback'));
+  traffic.length=0;
+  await diagnostic.goto('https://outside.test/oauth-redirect').catch(()=>{});
+  await wait(async()=>diagnostic.url().includes('/gate.html')&&diagnostic.url().includes('#target='));
+  await wait(async()=>diagnostic.locator('#retry').isEnabled());
+  assert.equal(await diagnostic.locator('#target').textContent(),'https://claude.ai/oauth/redirected?code=synthetic%26code&state=synthetic%3Dstate&extra=1');
+  assert.equal(formalRequests().length,0);await confirm(diagnostic);
+  assert.equal(new URL(diagnostic.url()).search,'?code=synthetic%26code&state=synthetic%3Dstate&extra=1');
   await diagnostic.close();
   pass('第三方请求可审核临时放行，仅允许审核域名，导航后撤销；第三方授权回调正常进入检查页并保留参数');
 

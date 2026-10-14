@@ -26,7 +26,7 @@
     "action": {
       "type": "redirect",
       "redirect": {
-        "extensionPath": "/gate.html"
+        "regexSubstitution": "chrome-extension://jnppijkakhomofmffakonooanpggmoff/gate.html#redirect=\\0"
       }
     },
     "condition": {
@@ -41,7 +41,8 @@
       ],
       "resourceTypes": [
         "main_frame"
-      ]
+      ],
+      "regexFilter": "^https?://.*"
     }
   },
   {
@@ -63,11 +64,11 @@
     "action": {
       "type": "redirect",
       "redirect": {
-        "extensionPath": "/gate.html"
+        "regexSubstitution": "chrome-extension://jnppijkakhomofmffakonooanpggmoff/gate.html#redirect=\\0"
       }
     },
     "condition": {
-      "regexFilter": "^(https?|wss)://(fuck-claude\\.vercel\\.app|fuck-claude\\.app)\\.?(?::[0-9]+)?/",
+      "regexFilter": "^(https?|wss)://(fuck-claude\\.vercel\\.app|fuck-claude\\.app)\\.?(?::[0-9]+)?/.*",
       "resourceTypes": [
         "main_frame"
       ]

@@ -393,6 +393,7 @@ $('#confirm').onclick = async () => {
 };
 $('#close').onclick = () => chrome.tabs.remove(tabId);
 (async () => {
+  if (location.hash.startsWith('#redirect=')) history.replaceState(null, '', '#target=' + encodeURIComponent(location.hash.slice('#redirect='.length)));
   tabId = (await chrome.tabs.getCurrent()).id;
   let view;
   if (!settingsOnly) {
