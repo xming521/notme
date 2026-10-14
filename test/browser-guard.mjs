@@ -694,6 +694,27 @@ try {
       condition:{urlFilter:'*',resourceTypes:['main_frame','sub_frame','xmlhttprequest']},
     }))});
   });
+  await control.evaluate(()=>chrome.storage.local.remove('targetExitRecords'));
+  const exitPage=await context.newPage();
+  await openGate(exitPage,'https://claude.ai/exit-first');
+  assert.match(await exitPage.locator('#target-network').textContent(),/首次记录/);
+  policies.set('claude.ai',{ip:'203.0.113.43',country:'JP'});
+  await openGate(exitPage,'https://claude.ai/exit-changed');
+  assert.match(await exitPage.locator('.exit-change').textContent(),/203\.0\.113\.42 → 203\.0\.113\.43/);
+  assert.equal(await exitPage.locator('#confirm').isEnabled(),true);
+  await exitPage.locator('#retry').click();await wait(async()=>await exitPage.locator('#retry').isEnabled());
+  assert.equal(await exitPage.locator('.exit-change').count(),1);
+  policies.set('claude.ai',{invalid:true});
+  await openGate(exitPage,'https://claude.ai/exit-failed');
+  assert.equal(await control.evaluate(async()=> (await chrome.storage.local.get('targetExitRecords')).targetExitRecords['claude.ai'].ip),'203.0.113.43');
+  policies.set('claude.ai',{ip:'203.0.113.43',country:'JP'});
+  await openGate(exitPage,'https://claude.ai/exit-same');
+  assert.equal(await exitPage.locator('.exit-change').count(),0);
+  assert.match(await exitPage.locator('#target-network').textContent(),/与上次相同/);
+  await openGate(exitPage,'https://www.anthropic.com/exit-independent');
+  assert.match(await exitPage.locator('#target-network').textContent(),/首次记录/);
+  await exitPage.close();policies.delete('claude.ai');
+  pass('按域名记录出口，变化提醒不阻断，同次重检保留提醒，失败不覆盖记录，各域名独立');
   const recoveryTargets=['https://claude.ai/chat/restore-one?x=1#anchor','https://www.anthropic.com/restore-two?x=2#section'];
   const recoveryURLs=[];
   for(const target of recoveryTargets){
@@ -725,6 +746,7 @@ try {
     await page.close();
   }
   pass('浏览器重启后恢复多个检查页的完整网址，重新检查确认前零正式请求');
+  assert.ok(await control.evaluate(async()=> (await chrome.storage.local.get('targetExitRecords')).targetExitRecords['claude.ai']?.ip));
   const movedSettings=(await send({type:'GET_STATE'})).settings;
   assert.equal(movedSettings.accuracyM,45);assert.deepEqual(movedSettings.guardDefaults,savedDefaults);
   assert.equal((await control.evaluate(()=>chrome.declarativeNetRequest.getDynamicRules())).some(rule=>[9001,9002,9003,9004,9005,19000,19001].includes(rule.id)),false);

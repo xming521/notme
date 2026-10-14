@@ -161,6 +161,17 @@ function renderNetwork(view) {
       ['HTTP 状态', [...new Set(reachable.map(probe => probe.status))].join(' / ') || '—']] : [],
     host !== new URL(view.target).hostname ? '检测 Claude 网络出口；确认后进入原检测站。' : connection?.blocking ? connection.detail : '',
     report.traceSource ? '确认后连接' : '未取得出口 IP');
+  if (report.exitRecord) {
+    const { previous, changed } = report.exitRecord;
+    const record = document.createElement('p');
+    record.className = changed ? 'exit-change' : 'card-note';
+    record.textContent = previous
+      ? (changed ? '出口 IP 已变化：' : '出口 IP 与上次相同：') + previous.ip
+        + (changed ? ' → ' + report.exitRecord.current.ip : '')
+        + '（上次：' + new Date(previous.checkedAt).toLocaleString() + '）'
+      : '首次记录此域名的出口 IP。';
+    target.append(record);
+  }
   const thirdParty = report.thirdPartyHTTP3 || {};
   const cloudflareTrace = thirdParty.trace;
   const cloudflareCheck = report.checks?.find(check => check.name === 'HTTP/3 / QUIC（第三方参考）');

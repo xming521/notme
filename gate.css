@@ -103,3 +103,5 @@ footer { color: var(--muted); font-size: 16px; border-top: 1px solid var(--line)
   section { padding: 4px 20px; }
   .actions { gap: 9px; }
 }
+
+.exit-change { margin: 16px 0 0; padding: 10px 12px; border-radius: 8px; background: #fff2d9; color: #805000; font-size: 16px; overflow-wrap: anywhere; }
