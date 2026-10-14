@@ -177,7 +177,7 @@ flowchart TD
 3. 开启右上角 **开发者模式**。
 4. 点击 **加载已解压的扩展程序**。
 5. 选择 `notme` 文件夹。
-6. 固定 notme，打开弹窗，点击 **Refresh**。
+6. 固定 notme，点击图标打开环境页面，需要时点击 **刷新环境**。
 
 ### 方式 B：加载未打包扩展（Microsoft Edge）
 
@@ -188,13 +188,19 @@ notme 是标准的 Chromium MV3 扩展，Edge 的加载方式完全相同：
 3. 打开左下角的 **开发人员模式 / Developer mode**。
 4. 点击 **加载解压缩的扩展 / Load unpacked**。
 5. 选择 `notme` 文件夹（即包含 `manifest.json` 的那个目录）。
-6. 从工具栏拼图图标里固定 notme，打开弹窗点击 **Refresh**。
+6. 从工具栏拼图图标里固定 notme，点击图标打开环境页面，需要时点击 **刷新环境**。
 
-Edge 支持 notme 用到的所有 `chrome.*` API（`declarativeNetRequest`、`alarms`、`privacy`），因此全部功能都可正常工作。如果弹窗显示错误，先确认代理/VPN 已连接，再点一次 **Refresh**。
+Edge 支持 notme 用到的所有 `chrome.*` API（`declarativeNetRequest`、`alarms`、`privacy`），因此全部功能都可正常工作。如果环境页面显示错误，先确认代理/VPN 已连接，再点一次 **刷新环境**。
 
 ### 方式 C：Chrome 应用商店 / Edge 加载项
 
 计划后续上架。在此之前请使用未打包扩展。
+
+### 更新未打包扩展
+
+从 1.8.1 起，manifest 内包含固定公钥，扩展 ID 固定为 `jnppijkakhomofmffakonooanpggmoff`，不再随目录路径变化。后续版本保持这份公钥不变。更新时可以覆盖原目录并点重新加载，也可以在同一浏览器配置中加载新的解压目录；扩展 ID 和本地设置保持不变。新目录需要保留在磁盘上。
+
+从 1.8.0 或更早版本升级时，先停用旧的那份，再加载 1.8.1。旧版使用目录生成的 ID，这次会更换一次 ID，旧设置不会自动迁移，需要在新版重新设置一次。后续更新不再需要重复配置。发布包仅包含公钥，扩展运行不需要私钥。
 
 ## 验证效果
 

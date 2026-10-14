@@ -147,6 +147,19 @@ Edge honors the same `chrome.*` APIs notme uses (`declarativeNetRequest`, `alarm
 
 Store listings are planned. Until then, use the unpacked extension.
 
+### Updating the unpacked extension
+
+From 1.8.1, the manifest contains a fixed public key. The extension ID is
+`jnppijkakhomofmffakonooanpggmoff`, independent of the directory path. Keep this
+key unchanged in future versions. To update, overwrite the existing directory
+and click Reload, or load a new unpacked directory in the same browser profile;
+the ID and local settings stay the same. The new directory must remain on disk.
+
+When moving from 1.8.0 or earlier, disable the old copy before loading 1.8.1.
+Those releases used path-derived IDs, so this is a one-time ID change and their
+settings are not automatically transferred. Reconfigure once in the new copy.
+The published key is public; the extension does not require a private key.
+
 ## Verify it works
 
 Open a fingerprint/location test page and check these values:

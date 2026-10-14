@@ -5,7 +5,7 @@ import { createServer as createProxy } from 'node:http';
 import { connect } from 'node:net';
 import { createSocket } from 'node:dgram';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, readdir, access, rm, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, access, rm, mkdir, writeFile, cp } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import Network from '../lib/network.js';
@@ -128,6 +128,7 @@ try {
   const worker = context.serviceWorkers().find(worker => worker.url().startsWith('chrome-extension:'))
     || await context.waitForEvent('serviceworker', { predicate: worker => worker.url().startsWith('chrome-extension:') });
   const id = new URL(worker.url()).hostname;
+  assert.equal(id, 'jnppijkakhomofmffakonooanpggmoff', '发布的固定 ID 不应变化');
   control = await context.newPage(); await control.goto(`chrome-extension://${id}/gate.html?settings`);
   await context.grantPermissions(['geolocation']);
   const original = await control.evaluate(() => ({ language: navigator.language, zone: Intl.DateTimeFormat().resolvedOptions().timeZone, ua: navigator.userAgent }));
@@ -411,10 +412,36 @@ try {
   const reset=Object.fromEntries(['enabled','tzEnabled','langEnabled','fontEnabled','webrtcProtect'].map(key => [key,true]));
   await send({type:'SET_SETTINGS',patch:{...reset,manualTz:'',accuracyM:30,guardDefaults:null,workerEnabled:false}});
 
+  await send({type:'SET_SETTINGS',patch:{accuracyM:45}});
+  const savedDefaults=Object.fromEntries(['enabled','tzEnabled','langEnabled','identityEnabled','fontEnabled','workerEnabled','webrtcProtect']
+    .map(key=>[key,!['workerEnabled','identityEnabled'].includes(key)]));
+  await send({type:'SET_SETTINGS',patch:{guardDefaults:savedDefaults}});
+  const relocated=join(temporary,'moved-extension');await mkdir(relocated);
+  for(const file of ['manifest.json','background.js','content-bridge.js','content-inject.js','guard-rules.json','gate.html','gate.css','gate.js','lib','icons']) {
+    await cp(resolve(file),join(relocated,file),{recursive:true});
+  }
+  await context.close();
+  context=await chromium.launchPersistentContext(join(temporary,'profile'),{
+    ...options,args:[...options.args,`--disable-extensions-except=${relocated}`,`--load-extension=${relocated}`],
+  });
+  const movedWorker=context.serviceWorkers().find(worker=>worker.url().startsWith('chrome-extension:'))
+    || await context.waitForEvent('serviceworker',{predicate:worker=>worker.url().startsWith('chrome-extension:')});
+  assert.equal(new URL(movedWorker.url()).hostname,id);
+  control=await context.newPage();await control.goto(`chrome-extension://${id}/gate.html?settings`);
+  const movedSettings=(await send({type:'GET_STATE'})).settings;
+  assert.equal(movedSettings.accuracyM,45);assert.deepEqual(movedSettings.guardDefaults,savedDefaults);
+  const movedPage=await context.newPage();traffic.length=0;
+  await openGate(movedPage,'https://claude.ai/relocated');
+  assert.equal(await movedPage.locator('input[name="identityEnabled"][value="native"]').isChecked(),true);
+  assert.equal(formalRequests().length,0);await confirm(movedPage);
+  assert.equal((await movedPage.evaluate(()=>window.first)).zone,'America/Los_Angeles');
+  assert.equal((await movedPage.evaluate(()=>window.first)).ua,original.ua);
+  pass('换目录加载保持固定 ID、定位精度与默认选择；新目录的访问拦截和确认流程正常');
+
   await mkdir('test-results', { recursive: true });
   await writeFile('test-results/browser-guard.json', JSON.stringify({ browser: context.browser()?.version(), results, count: results.length }, null, 2));
-  await openGate(another, 'https://claude.ai/final');
-  await another.screenshot({ path: 'test-results/gate.png', fullPage: true });
+  await openGate(movedPage, 'https://claude.ai/final');
+  await movedPage.screenshot({ path: 'test-results/gate.png', fullPage: true });
   console.log(`Verified ${results.length} navigation scenarios.`);
 } catch (error) {
   await mkdir('test-results', { recursive: true });
