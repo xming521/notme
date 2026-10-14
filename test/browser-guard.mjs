@@ -3,6 +3,7 @@ import { chromium } from 'playwright-core';
 import { createServer } from 'node:https';
 import { createServer as createProxy } from 'node:http';
 import { connect } from 'node:net';
+import { createSocket } from 'node:dgram';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, readdir, access, rm, mkdir, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -24,7 +25,8 @@ const server = createServer({ key: await readFile(join(temporary, 'key.pem')), c
   const policy = policies.get(host) || {};
   if (url.pathname === '/cdn-cgi/trace') {
     response.setHeader('Content-Type', 'text/plain');
-    response.end(policy.invalid ? 'challenge' : `h=${host.replace(/\.$/, '')}\nip=${policy.ip || '203.0.113.42'}\nloc=${policy.country || 'US'}\ncolo=LAX\n`);
+    response.setHeader('Alt-Svc','h3=":443"; ma=3600');
+    response.end(policy.invalid ? 'challenge' : `h=${host.replace(/\.$/, '')}\nip=${policy.ip || '203.0.113.42'}\nloc=${policy.country || 'US'}\ncolo=LAX\nhttp=${policy.protocol || 'http/2'}\n`);
   } else if (host === 'ipwho.is') {
     const jp = url.pathname.includes('203.0.113.43');
     response.setHeader('Content-Type', 'application/json');
@@ -68,6 +70,19 @@ proxy.on('connect', (request, socket, head) => {
   socket.on('error', () => upstream.destroy()); upstream.on('error', () => socket.destroy()); socket.on('close', () => upstream.destroy());
 });
 await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
+let udpIP = '203.0.113.42';
+let udpRespond = true;
+let udpRequests = 0;
+const stun = createSocket('udp4');
+stun.on('message', (request, remote) => {
+  udpRequests++;
+  if (!udpRespond || request.length < 20 || request.readUInt16BE(0) !== 1) return;
+  const response=Buffer.alloc(32);response.writeUInt16BE(0x0101,0);response.writeUInt16BE(12,2);request.copy(response,4,4,20);
+  response.writeUInt16BE(0x0020,20);response.writeUInt16BE(8,22);response[25]=1;response.writeUInt16BE(remote.port ^ 0x2112,26);
+  const mask=[0x21,0x12,0xa4,0x42];udpIP.split('.').forEach((part,index)=>response[28+index]=Number(part)^mask[index]);
+  stun.send(response,remote.port,remote.address);
+});
+await new Promise(resolve => stun.bind(0,'127.0.0.1',resolve));
 
 async function executable() {
   if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
@@ -101,6 +116,14 @@ try {
   context = await chromium.launchPersistentContext(join(temporary, 'profile'), {
     ...options,args:[...options.args,`--disable-extensions-except=${resolve('.')}`,`--load-extension=${resolve('.')}`],
   });
+  await context.addInitScript(({port}) => {
+    const Native=window.RTCPeerConnection;
+    if (Native) window.RTCPeerConnection=new Proxy(Native,{construct(target,args){
+      const config={...args[0]};
+      if(config.iceServers?.some(server=>String(server.urls).includes('stun.cloudflare.com'))) config.iceServers=[{urls:`stun:127.0.0.1:${port}`}];
+      return Reflect.construct(target,[config]);
+    }});
+  }, {port:stun.address().port});
   const worker = context.serviceWorkers().find(worker => worker.url().startsWith('chrome-extension:'))
     || await context.waitForEvent('serviceworker', { predicate: worker => worker.url().startsWith('chrome-extension:') });
   const id = new URL(worker.url()).hostname;
@@ -296,6 +319,36 @@ try {
   const hiddenFont = await fontWidths(another); assert.equal(hiddenFont.custom, hiddenFont.generic);
   pass('主动开启 Worker 伪装后使用所选时区语言；字体伪装能隐藏已加载的地区字体');
 
+  const beforeRestricted=udpRequests;
+  await openGate(another,'https://claude.ai/udp-protected');
+  assert.ok((await another.locator('#checks').innerText()).includes('未发送 STUN'));
+  assert.equal(udpRequests,beforeRestricted);assert.equal(await another.locator('#confirm').isEnabled(),true);
+  pass('当前 WebRTC 保护限制 UDP 时显示未测，且不发送任何 STUN 包');
+
+  await send({type:'SET_SETTINGS',patch:{webrtcProtect:false}});
+  traffic.length=0;await openGate(another,'https://claude.ai/udp-match');
+  assert.ok((await another.locator('#checks').innerText()).includes('与目标 HTTPS 出口一致'));
+  assert.ok(udpRequests>beforeRestricted);assert.equal(formalRequests().length,0);
+  assert.equal(await another.locator('#confirm').isEnabled(),true);
+  assert.ok((await another.locator('#checks').innerText()).includes('目标实际使用 HTTP/2'));
+  pass('真实浏览器经本地 UDP/STUN 收到响应；HTTP/2 和 Alt-Svc 不会误报 HTTP/3');
+
+  udpIP='203.0.113.99';traffic.length=0;await openGate(another,'https://claude.ai/udp-different');
+  assert.ok((await another.locator('#checks').innerText()).includes('UDP 出口 203.0.113.99 与目标 HTTPS 出口 203.0.113.42 不同'));
+  assert.equal(formalRequests().length,0);assert.equal(await another.locator('#confirm').isEnabled(),true);
+  pass('UDP 与 HTTPS 出口不一致时明确提示分流或代理风险，保持确认前零正式请求');
+
+  udpRespond=false;await openGate(another,'https://claude.ai/udp-timeout');
+  assert.ok((await another.locator('#checks').innerText()).includes('未取得 STUN 响应'));
+  assert.equal(await another.locator('#confirm').isEnabled(),true);udpRespond=true;udpIP='203.0.113.42';
+  pass('STUN 超时报告 UDP 未验证，不假定网络故障或阻止正常 HTTPS 访问');
+
+  policies.set('claude.ai',{protocol:'http/3'});await openGate(another,'https://claude.ai/h3-observed');
+  assert.ok((await another.locator('#checks').innerText()).includes('3/3 次目标请求已使用 HTTP/3'));
+  assert.equal(await another.locator('#confirm').isEnabled(),true);
+  policies.delete('claude.ai');await send({type:'SET_SETTINGS',patch:{webrtcProtect:true}});
+  pass('HTTP/3 仅根据目标 trace 的实际协议字段显示已验证');
+
   await mkdir('test-results', { recursive: true });
   await writeFile('test-results/browser-guard.json', JSON.stringify({ browser: context.browser()?.version(), results, count: results.length }, null, 2));
   await openGate(another, 'https://claude.ai/final');
@@ -308,6 +361,6 @@ try {
     url: page?.url(), body: await page?.locator('body').innerText().catch(() => '') }, null, 2));
   throw error;
 } finally {
-  await context?.close(); proxy.closeAllConnections(); proxy.close(); server.closeAllConnections(); server.close();
+  await context?.close(); stun.close(); proxy.closeAllConnections(); proxy.close(); server.closeAllConnections(); server.close();
   await rm(temporary, { recursive: true, force: true });
 }

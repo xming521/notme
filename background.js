@@ -10,7 +10,7 @@
  *    *outgoing* HTTP header matches the spoofed language, not just navigator.
  *  - Refresh on install / startup and on demand (one-tap re-detect).
  */
-importScripts('lib/geo.js', 'lib/providers.js', 'lib/locale.js', 'lib/tzdata.js', 'lib/identity.js', 'lib/network.js', 'lib/environment.js');
+importScripts('lib/geo.js', 'lib/providers.js', 'lib/locale.js', 'lib/tzdata.js', 'lib/identity.js', 'lib/network.js', 'lib/environment.js', 'lib/udp.js');
 
 const DEFAULT_SETTINGS = {
   enabled: true,

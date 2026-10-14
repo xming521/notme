@@ -65,20 +65,31 @@ function render(view) {
   showChoices(view.override);
   $('#checks').replaceChildren(...(view.report?.checks || []).map(check => {
     const row = document.createElement('div'); row.className = 'check ' + check.status;
-    const icon = document.createElement('span'); icon.textContent = check.status === 'ok' ? '✓' : check.status === 'warn' ? '!' : '×';
+    const icon = document.createElement('span'); icon.textContent = check.status === 'ok' ? '✓' : check.status === 'warn' ? '!' : check.status === 'info' ? 'i' : '×';
     const text = document.createElement('div');
     const label = document.createElement('b'); label.textContent = check.name;
     const detail = document.createElement('p'); detail.textContent = check.detail;
     text.append(label, detail); row.append(icon, text); return row;
   }));
   $('#confirm').disabled = !view.report?.ready;
-  $('#summary').textContent = view.report?.ready ? '检查通过。请核对本次选择，然后确认访问。' : '检查未通过。正式网页仍被拦截，请处理问题后重试。';
+  $('#summary').textContent = view.report?.ready ? view.report.checks.some(check => check.status === 'warn')
+    ? '可以访问；协议诊断有提示，请核对后确认。' : '检查通过。请核对本次选择，然后确认访问。'
+    : '检查未通过。正式网页仍被拦截，请处理问题后重试。';
 }
 async function check() {
   const current = ++revision;
   busy = true; $('#confirm').disabled = true; $('#retry').disabled = true; $('#error').textContent = '';
   showChoices(); $('#summary').textContent = '正在检查网络与所选环境…';
-  try { const view = await send('CHECK', { selection: selection() }); if (current === revision) render(view); }
+  const chosen = selection();
+  try {
+    const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
+    const [view, udp] = await Promise.all([
+      send('CHECK', { selection: chosen }), NotmeUDP.probe({ policy: policy.value }),
+    ]);
+    if (current !== revision) return;
+    const updated = await send('UDP', { navigationId: view.navigationId, selection: chosen, udp });
+    if (current === revision) render(updated);
+  }
   catch (error) { if (current === revision) $('#error').textContent = error.message; }
   finally { if (current === revision) { busy = false; $('#retry').disabled = false; } }
 }

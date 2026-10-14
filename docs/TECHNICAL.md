@@ -37,9 +37,27 @@ are the only protected requests allowed from the extension before approval.
 Browser APIs do not provide a raw TCP handshake or independent DNS result; the
 preflight measures the browser's HTTPS path to the requested hostname.
 
+The trace's `http` field records the protocol of that request. `http=http/3`
+confirms target HTTP/3/QUIC use; a successful HTTPS response, an `Alt-Svc` header,
+HTTP/2 fallback or an absent field does not. The extension cannot force `fetch`
+to use HTTP/3. This diagnostic is informational and does not affect admission.
+
+`lib/udp.js` runs in the local gate page, where `RTCPeerConnection` is available.
+Under `disable_non_proxied_udp`, it returns a restricted result without creating
+a peer or modifying privacy settings. Otherwise it gathers ICE candidates with
+Cloudflare's documented [STUN UDP endpoint](https://developers.cloudflare.com/realtime/turn/#service-address-and-ports)
+for at most four seconds, alongside the HTTPS checks. Only `udp` / `srflx`
+candidates establish a response; local, mDNS, TCP and relay candidates do not.
+The peer is closed on completion, error or timeout. Public addresses are
+normalized before comparison with the HTTPS exit. Different endpoints can have
+different legitimate routes, so a mismatch is a warning, not a proven IP leak.
+No response remains unknown. The result reflects the current policy; the chosen
+WebRTC setting still applies only on confirmation.
+
 `lib/guard.js` keeps the pending target and profile per tab in session storage.
-Every main-frame navigation creates a fresh check. The gate requires all checks
-to pass, then a separate click; warnings and unknown results cannot be bypassed.
+Every main-frame navigation creates a fresh check. The gate requires the HTTPS
+and selected-profile checks to pass, then a separate click; their warnings and
+unknown results cannot be bypassed. UDP and HTTP/3 diagnostics are informational.
 Confirmation repeats the three probes, requires the same exit IP and country,
 and rejects changed admission settings or selections. A check is
 valid for at most 60 seconds.

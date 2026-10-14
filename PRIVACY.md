@@ -34,6 +34,11 @@ listed below, using the data needed for those checks.
    Confirmation repeats this probe. The target's reported exit IP is used for an
    explicit IP geolocation lookup; this handles proxies that route destinations
    through different exits.
+8. When the current WebRTC policy permits it, the local check page uses a
+   data-channel ICE gather to send UDP/STUN probes to Cloudflare. No microphone,
+   camera, remote peer, cookies or credentials are used. The STUN server sees the
+   source address of that UDP path, which may differ from the HTTPS proxy exit.
+   With non-proxied UDP protection active, no STUN probe is sent.
 
 ## Network requests (the complete list)
 
@@ -44,6 +49,7 @@ listed below, using the data needed for those checks.
 | `ipapi.co` | Fallback IP geolocation | GET only |
 | `ipinfo.io` | Fallback IP geolocation; optional token if you provide one | GET; your token if entered |
 | Requested host under `anthropic.com`, `claude.ai`, `claude.com`, `claude.app`, `claudeusercontent.com`, `claudemcpcontent.com`, `claude.site` | HTTPS connectivity and destination-exit check | GET `/cdn-cgi/trace`; no cookies or credentials |
+| `stun.cloudflare.com:3478/udp` | UDP response and exit-address diagnostic | STUN binding packets; the UDP source IP is visible to the service |
 | `overpass-api.de`, `overpass.kumi.systems`, `maps.mail.ru/osm/tools/overpass` | Find nearby residential roads (OpenStreetMap) | The exit-IP latitude/longitude |
 | `api.bigdatacloud.net` | Reverse-geocode the chosen point for display | The chosen override latitude/longitude |
 
@@ -65,6 +71,9 @@ declared as `<all_urls>` for the content scripts and request rules.
   tab closes or leaves the protected site; they are not uploaded as history.
   Per-visit spoof/default flags are stored with that profile. The latest confirmed
   WebRTC choice is stored in session storage because Chrome applies it browser-wide.
+  The UDP diagnostic retains only the resulting public-address summary, not SDP
+  or host/mDNS candidate addresses. HTTP/3 detection reuses the target trace and
+  adds no endpoint.
 - The checked profile is temporarily carried in a URL fragment on admission.
   Fragments are not sent in HTTP requests; the MAIN-world injector consumes it
   at document start and restores the original fragment.
