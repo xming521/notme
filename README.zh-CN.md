@@ -12,6 +12,8 @@ notme 是一个 Chrome Manifest V3 扩展，适合使用代理、VPN、远程桌
 
 每次打开或刷新 Anthropic 网址，先进入本地环境选择页。可以选择 **使用 notme 伪装**、**全部使用系统默认**，也可以逐项自定义。静态规则提前拦截正式 HTML 和子资源；检查全部通过后，还需要你点击 **确认并访问**。以前访问过、其他标签页已放行，都不能代替这次确认。
 
+工具栏图标和访问前检查现在打开同一个中文页面：七项环境开关与时区选择在一起，网络详情和高级设置默认收起，失败原因自动展开。时区、延迟阈值、定位精度、刷新间隔和可选 Token 修改后自动保存，并重新检查；点击 **保存为默认** 可记住当前七项选择，用于下一次访问及普通网站（其他网站的设备伪装单独在高级设置中控制）。保存配置不会代替访问确认。
+
 覆盖 `anthropic.com`、`claude.ai`、`claude.com`、`claude.app`、`claudeusercontent.com`、`claudemcpcontent.com`、`claude.site` 及它们的所有子域。两个浏览器指纹检测站保留原来的画像防护，不增加访问检查页。
 
 每次检查向实际目标域名的 `/cdn-cgi/trace` 发起三次不带 Cookie 的 HTTPS 请求，核实连通性、延迟、出口是否稳定，并沿用 `verify-networking` 的地区限制（`CN`、`HK`、`KP`、`CU`、`IR`、`SY`、`RU`、`BY`）。地理位置查询使用该目标实际返回的出口 IP，避免代理分流时误用通用查 IP 服务的出口。关键 HTTPS 检查结果未知或有警告时，不能确认进入。只对所选的伪装项准备环境数据；选择系统默认时，不会强制把原生时区改成出口时区。点击确认时再次检查网络；出口或相关设置改变会使原来的检查失效。检查超过一分钟需要重做。
@@ -279,7 +281,7 @@ cd tools/claude-tz && bash install.sh          # macOS / Linux / WSL（zsh/bash/
    - navigator.language 和 navigator.languages
    - Intl.DateTimeFormat / Intl.NumberFormat / Intl.Collator 默认 locale
 8. 使用 chrome.declarativeNetRequest 在 language spoof 开启时设置 outgoing Accept-Language header。
-9. 添加 popup，提供 location/timezone/language 开关、accuracy、refresh interval、可选 ipinfo token、手动刷新。
+9. 工具栏和访问前检查共用中文环境页面，逐项选择伪装或系统默认；时区直接选择，其余参数放在折叠的高级设置中。
 10. 添加测试，覆盖 timezone DST offset、locale 推断、provider parsing、manifest 注入顺序。
 11. 写清楚隐私模型：无 telemetry，不读取页面内容，只本地存储；外部请求仅用于出口 IP / 地理位置匹配。
 ```
@@ -322,9 +324,9 @@ notme/
 │   ├── locale.js
 │   ├── providers.js
 │   └── timezone.js
-├── popup.html
-├── popup.css
-├── popup.js
+├── gate.html
+├── gate.css
+├── gate.js
 ├── test/
 │   └── run-tests.js
 └── icons/
@@ -340,7 +342,7 @@ node --check content-bridge.js
 node --check lib/providers.js
 node --check lib/locale.js
 node --check lib/timezone.js
-node --check popup.js
+node --check gate.js
 ```
 
 改动后，在 `chrome://extensions` 点击扩展卡片上的刷新图标重新加载。

@@ -26,7 +26,8 @@ const server = createServer({ key: await readFile(join(temporary, 'key.pem')), c
   if (url.pathname === '/cdn-cgi/trace') {
     response.setHeader('Content-Type', 'text/plain');
     response.setHeader('Alt-Svc','h3=":443"; ma=3600');
-    response.end(policy.invalid ? 'challenge' : `h=${host.replace(/\.$/, '')}\nip=${policy.ip || '203.0.113.42'}\nloc=${policy.country || 'US'}\ncolo=LAX\nhttp=${policy.protocol || 'http/2'}\n`);
+    const body = policy.invalid ? 'challenge' : `h=${host.replace(/\.$/, '')}\nip=${policy.ip || '203.0.113.42'}\nloc=${policy.country || 'US'}\ncolo=LAX\nhttp=${policy.protocol || 'http/2'}\n`;
+    if (policy.delayMs) setTimeout(() => response.end(body), policy.delayMs); else response.end(body);
   } else if (host === 'ipwho.is') {
     const jp = url.pathname.includes('203.0.113.43');
     response.setHeader('Content-Type', 'application/json');
@@ -127,7 +128,7 @@ try {
   const worker = context.serviceWorkers().find(worker => worker.url().startsWith('chrome-extension:'))
     || await context.waitForEvent('serviceworker', { predicate: worker => worker.url().startsWith('chrome-extension:') });
   const id = new URL(worker.url()).hostname;
-  control = await context.newPage(); await control.goto(`chrome-extension://${id}/popup.html`);
+  control = await context.newPage(); await control.goto(`chrome-extension://${id}/gate.html?settings`);
   await context.grantPermissions(['geolocation']);
   const original = await control.evaluate(() => ({ language: navigator.language, zone: Intl.DateTimeFormat().resolvedOptions().timeZone, ua: navigator.userAgent }));
   const send = (message) => control.evaluate(message => chrome.runtime.sendMessage(message), message);
@@ -165,6 +166,20 @@ try {
   });
   const pass = name => { results.push(name); console.log('PASS ' + name); };
   const formalRequests = () => traffic.filter(item => Network.protectedHost(`https://${item.host}/`) && item.path !== '/cdn-cgi/trace');
+  const checkDetails = async page => {
+    if (!await page.locator('#diagnostics').evaluate(node => node.open)) await page.locator('#diagnostics > summary').click();
+    return page.locator('#checks').innerText();
+  };
+
+  await wait(async () => await control.locator('#retry').isEnabled());
+  assert.equal(await control.locator('#heading').innerText(), '设置默认环境。');
+  assert.equal(await control.locator('#confirm').isVisible(), false);
+  assert.equal(await control.locator('#advanced').evaluate(node => node.open), false);
+  assert.equal(await control.locator('#choices input:checked').count(), 7);
+  assert.equal(await worker.evaluate(() => chrome.action.onClicked.hasListener(openEnvironmentPage)), true);
+  await worker.evaluate(() => openEnvironmentPage({url:'https://outside.test/'}));
+  assert.equal((await context.pages().filter(page => page.url().endsWith('gate.html?settings'))).length, 1);
+  pass('工具栏入口与默认设置使用合并页面，七项选择完整，高级设置默认收起，重复点击复用标签页');
 
   const offline = await context.newPage();
   await openGate(offline, 'https://cached.claude.ai/reopen');
@@ -299,8 +314,8 @@ try {
       assert.equal(formalRequests().at(0).ua, nativeHeaders.ua);
     }],
     ['字体', async page => { const width = await fontWidths(page); assert.notEqual(width.custom, width.generic); }],
-    ['Web Worker', async page => assert.deepEqual(await workerProfile(page), nativeWorker)],
-    ['WebRTC', async () => assert.notEqual((await control.evaluate(() => chrome.privacy.network.webRTCIPHandlingPolicy.get({}))).levelOfControl, 'controlled_by_this_extension')],
+    ['后台脚本（Web Worker）', async page => assert.deepEqual(await workerProfile(page), nativeWorker)],
+    ['IP 防泄漏（WebRTC）', async () => assert.notEqual((await control.evaluate(() => chrome.privacy.network.webRTCIPHandlingPolicy.get({}))).levelOfControl, 'controlled_by_this_extension')],
   ];
   for (const [label, verify] of cases) {
     traffic.length = 0; await openGate(another, 'https://claude.ai/mixed');
@@ -313,7 +328,7 @@ try {
     pass(`单独将${label}设为系统默认，其他伪装仍生效`);
   }
   await openGate(another, 'https://claude.ai/worker-spoof');
-  await select(another, 'Web Worker', '伪装'); await confirm(another);
+  await select(another, '后台脚本（Web Worker）', '伪装'); await confirm(another);
   await workerProfile(another); await another.waitForTimeout(200);
   assert.deepEqual(await workerProfile(another), { zone:'America/Los_Angeles',language:'en-US' });
   const hiddenFont = await fontWidths(another); assert.equal(hiddenFont.custom, hiddenFont.generic);
@@ -321,33 +336,80 @@ try {
 
   const beforeRestricted=udpRequests;
   await openGate(another,'https://claude.ai/udp-protected');
-  assert.ok((await another.locator('#checks').innerText()).includes('未发送 STUN'));
+  assert.ok((await checkDetails(another)).includes('未发送 STUN'));
   assert.equal(udpRequests,beforeRestricted);assert.equal(await another.locator('#confirm').isEnabled(),true);
   pass('当前 WebRTC 保护限制 UDP 时显示未测，且不发送任何 STUN 包');
 
   await send({type:'SET_SETTINGS',patch:{webrtcProtect:false}});
   traffic.length=0;await openGate(another,'https://claude.ai/udp-match');
-  assert.ok((await another.locator('#checks').innerText()).includes('与目标 HTTPS 出口一致'));
+  assert.ok((await checkDetails(another)).includes('与目标 HTTPS 出口一致'));
   assert.ok(udpRequests>beforeRestricted);assert.equal(formalRequests().length,0);
   assert.equal(await another.locator('#confirm').isEnabled(),true);
-  assert.ok((await another.locator('#checks').innerText()).includes('目标实际使用 HTTP/2'));
+  assert.ok((await checkDetails(another)).includes('目标实际使用 HTTP/2'));
   pass('真实浏览器经本地 UDP/STUN 收到响应；HTTP/2 和 Alt-Svc 不会误报 HTTP/3');
 
   udpIP='203.0.113.99';traffic.length=0;await openGate(another,'https://claude.ai/udp-different');
-  assert.ok((await another.locator('#checks').innerText()).includes('UDP 出口 203.0.113.99 与目标 HTTPS 出口 203.0.113.42 不同'));
+  assert.ok((await checkDetails(another)).includes('UDP 出口 203.0.113.99 与目标 HTTPS 出口 203.0.113.42 不同'));
   assert.equal(formalRequests().length,0);assert.equal(await another.locator('#confirm').isEnabled(),true);
   pass('UDP 与 HTTPS 出口不一致时明确提示分流或代理风险，保持确认前零正式请求');
 
   udpRespond=false;await openGate(another,'https://claude.ai/udp-timeout');
-  assert.ok((await another.locator('#checks').innerText()).includes('未取得 STUN 响应'));
+  assert.ok((await checkDetails(another)).includes('未取得 STUN 响应'));
   assert.equal(await another.locator('#confirm').isEnabled(),true);udpRespond=true;udpIP='203.0.113.42';
   pass('STUN 超时报告 UDP 未验证，不假定网络故障或阻止正常 HTTPS 访问');
 
   policies.set('claude.ai',{protocol:'http/3'});await openGate(another,'https://claude.ai/h3-observed');
-  assert.ok((await another.locator('#checks').innerText()).includes('3/3 次目标请求已使用 HTTP/3'));
+  assert.ok((await checkDetails(another)).includes('3/3 次目标请求已使用 HTTP/3'));
   assert.equal(await another.locator('#confirm').isEnabled(),true);
   policies.delete('claude.ai');await send({type:'SET_SETTINGS',patch:{webrtcProtect:true}});
   pass('HTTP/3 仅根据目标 trace 的实际协议字段显示已验证');
+
+  traffic.length=0;await openGate(another,'https://claude.ai/inline-settings');
+  assert.equal(await another.locator('#advanced').evaluate(node => node.open),false);
+  assert.equal(await another.locator('#diagnostics').evaluate(node => node.open),false);
+  await another.locator('#manualTz').selectOption('Asia/Tokyo');
+  await wait(async () => (await send({type:'GET_STATE'})).settings.manualTz === 'Asia/Tokyo' && await another.locator('#retry').isEnabled());
+  assert.ok((await another.locator('#detail-tzEnabled').innerText()).includes('Asia/Tokyo'));
+  assert.equal(formalRequests().length,0);await confirm(another);
+  assert.equal((await another.evaluate(() => window.first)).zone,'Asia/Tokyo');
+  assert.equal((await another.evaluate(() => window.first)).language,'ja-JP');
+  pass('在环境选择页直接修改时区，自动保存并重新检查；确认前零正式请求，首个脚本使用新时区与语言');
+
+  await openGate(another,'https://claude.ai/advanced-settings');
+  await another.locator('#advanced > summary').click();
+  const beforePreferences=(await send({type:'GET_STATE'})).settings;
+  policies.set('claude.ai',{delayMs:150});
+  const beforeSlowCheck=traffic.filter(item => item.host === 'claude.ai' && item.path === '/cdn-cgi/trace').length;
+  await another.locator('#retry').click();
+  await wait(async () => traffic.filter(item => item.host === 'claude.ai' && item.path === '/cdn-cgi/trace').length > beforeSlowCheck);
+  await another.locator('#accuracyM').fill('45');await another.locator('#accuracyM').blur();
+  await wait(async () => (await send({type:'GET_STATE'})).settings.accuracyM === 45 && await another.locator('#retry').isEnabled());
+  const afterPreferences=(await send({type:'GET_STATE'})).settings;
+  assert.equal(afterPreferences.refreshMinutes,beforePreferences.refreshMinutes);
+  assert.equal(afterPreferences.networkWarnMs,beforePreferences.networkWarnMs);
+  assert.equal(afterPreferences.ipToken,beforePreferences.ipToken);
+  assert.equal(await another.locator('#ipToken').getAttribute('type'),'password');
+  policies.delete('claude.ai');
+  await confirm(another);
+  const accuracy=await another.evaluate(() => new Promise(resolve => navigator.geolocation.getCurrentPosition(p => resolve(p.coords.accuracy))));
+  assert.ok(accuracy >= 41 && accuracy <= 49,`定位精度应以 45 米为中心，实际为 ${accuracy}`);
+  pass('检查过程中修改高级参数会重做检查并使用新定位精度；其他参数保留，Token 隐藏');
+
+  await openGate(another,'https://claude.ai/save-defaults');
+  await preset(another,'全部使用系统默认');await another.locator('#save-defaults').click();
+  await wait(async () => (await another.locator('#saved').innerText()).includes('已保存默认环境') && await another.locator('#retry').isEnabled());
+  const remembered=await context.newPage();traffic.length=0;
+  await openGate(remembered,'https://claude.ai/remembered');
+  assert.equal(await remembered.locator('#choices input[value="native"]:checked').count(),7);
+  assert.equal(formalRequests().length,0);await confirm(remembered);
+  assert.deepEqual(await remembered.evaluate(() => ({language:window.first.language,zone:window.first.zone,ua:window.first.ua})),original);
+  await preset(another,'使用 notme 伪装');
+  assert.equal(await another.locator('#choices input[value="spoof"]:checked').count(),6);
+  await remembered.close();
+  pass('保存默认选择后新访问预选相同开关，仍需确认；伪装预设可恢复，系统默认不强制伪装');
+
+  const reset=Object.fromEntries(['enabled','tzEnabled','langEnabled','fontEnabled','webrtcProtect'].map(key => [key,true]));
+  await send({type:'SET_SETTINGS',patch:{...reset,manualTz:'',accuracyM:30,guardDefaults:null,workerEnabled:false}});
 
   await mkdir('test-results', { recursive: true });
   await writeFile('test-results/browser-guard.json', JSON.stringify({ browser: context.browser()?.version(), results, count: results.length }, null, 2));

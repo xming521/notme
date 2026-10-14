@@ -19,7 +19,7 @@ listed below, using the data needed for those checks.
 2. It then queries the OpenStreetMap Overpass API for residential roads near
    that location and picks a point on one of them as the override coordinate.
 3. It optionally asks BigDataCloud for a human-readable address of that point,
-   purely so the popup can display it.
+   purely so the environment page can display it.
 4. A content script injects the chosen coordinate into `navigator.geolocation`
    on the pages you visit, so pages receive a location consistent with your IP.
 5. Page scripts also apply the configured timezone, locale, and font protections.

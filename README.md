@@ -12,6 +12,8 @@ notme is a Chrome Manifest V3 extension for people who use proxies, VPNs, remote
 
 Opening or reloading an Anthropic URL first redirects to a local environment selection page. Choose **Use notme spoofing**, **Use system defaults**, or set each surface independently. The static rules block the site's main HTML and subresources until the checks pass **and you click Confirm**. A previous visit or another tab does not authorize a new navigation.
 
+The toolbar and navigation gate now share one Chinese environment page. All seven choices and the timezone selector are together; network details and advanced preferences start collapsed, while blocking failures expand automatically. Timezone, latency threshold, accuracy, refresh interval and optional token changes are saved immediately and trigger fresh checks. **Save as default** remembers the seven choices for future visits and ordinary sites; ordinary-site identity masking stays a separate advanced preference. Saving settings does not authorize a navigation.
+
 The protected roots are `anthropic.com`, `claude.ai`, `claude.com`, `claude.app`, `claudeusercontent.com`, `claudemcpcontent.com`, and `claude.site`, including all their subdomains. The two fingerprint verification sites keep their existing profile protection without this navigation gate.
 
 Each check makes three cookie-free HTTPS requests to the actual destination's `/cdn-cgi/trace`. It checks connectivity, latency, a stable exit IP, and the inherited `verify-networking` country restrictions (`CN`, `HK`, `KP`, `CU`, `IR`, `SY`, `RU`, `BY`). The observed destination IP is then used for geolocation; a generic IP lookup cannot stand in for the destination's exit when a proxy routes hosts differently. Unknown essential HTTPS results and warnings keep the Confirm button disabled. Only the selected spoofed surfaces require profile data; selecting system defaults does not force the browser to match the exit timezone. Confirmation repeats the network probe and rejects changed settings or a changed exit. Checks expire after one minute.
@@ -77,7 +79,7 @@ Important accuracy note: notme is not a zero-network extension. To match your cu
 
 - detecting the exit IP location,
 - finding nearby residential roads,
-- reverse-geocoding a display address for the popup.
+- reverse-geocoding a display address for the environment page.
 - checking the requested Anthropic host's `/cdn-cgi/trace` and locating its observed exit IP.
 
 It does not upload page content or browsing history. See [PRIVACY.md](./PRIVACY.md) and [docs/TECHNICAL.md](./docs/TECHNICAL.md) for the exact data flow.
@@ -93,7 +95,7 @@ It does not upload page content or browsing history. See [PRIVACY.md](./PRIVACY.
                  ┌────────────────────┼────────────────────┐
                  ▼                    ▼                    ▼
           IP geolocation      residential roads      reverse geocode
-          + timezone          near exit IP            for popup display
+          + timezone          near exit IP            for environment display
                  │                    │                    │
                  └──────────────► computed override ◄──────┘
                                       │
@@ -126,7 +128,7 @@ Technical sequence:
 3. Enable **Developer mode**.
 4. Click **Load unpacked**.
 5. Select the `notme` folder.
-6. Pin notme and click **Refresh** in the popup.
+6. Pin notme and click its icon to open the environment page. Use **刷新环境** (Refresh environment) to update the profile.
 
 ### Option B — load unpacked (Microsoft Edge)
 
@@ -137,9 +139,9 @@ notme is a standard Chromium MV3 extension, so Edge loads it the same way:
 3. Toggle **Developer mode** on (bottom-left).
 4. Click **Load unpacked**.
 5. Select the `notme` folder (the one containing `manifest.json`).
-6. Pin notme from the puzzle-piece menu, open it, and click **Refresh**.
+6. Pin notme from the puzzle-piece menu, open it, and click **刷新环境** (Refresh environment).
 
-Edge honors the same `chrome.*` APIs notme uses (`declarativeNetRequest`, `alarms`, `privacy`), so all features work unchanged. If the popup shows an error, click **Refresh** once your proxy/VPN is connected.
+Edge honors the same `chrome.*` APIs notme uses (`declarativeNetRequest`, `alarms`, `privacy`), so all features work unchanged. If the environment page shows an error, click **刷新环境** (Refresh environment) once your proxy/VPN is connected.
 
 ### Option C — Chrome Web Store / Edge Add-ons
 
@@ -238,7 +240,7 @@ Requirements:
    - navigator.language and navigator.languages
    - Intl.DateTimeFormat / Intl.NumberFormat / Intl.Collator default locale
 8. Use chrome.declarativeNetRequest to set the outgoing Accept-Language header when language spoofing is enabled.
-9. Add a popup with toggles for location, timezone, language, accuracy, refresh interval, optional ipinfo token, and manual refresh.
+9. Share one Chinese environment page between the toolbar and navigation gate, with seven spoof/default choices, an inline timezone selector and collapsed advanced preferences.
 10. Add tests for timezone DST offsets, locale inference, provider parsing, and manifest injection order.
 11. Document the privacy model clearly: no telemetry, no page-content reading, local storage only, and explicit provider requests only for exit-IP/location matching.
 ```
@@ -280,9 +282,9 @@ notme/
 │   ├── locale.js
 │   ├── providers.js
 │   └── timezone.js
-├── popup.html
-├── popup.css
-├── popup.js
+├── gate.html
+├── gate.css
+├── gate.js
 ├── test/
 │   └── run-tests.js
 └── icons/
@@ -298,7 +300,7 @@ node --check content-bridge.js
 node --check lib/providers.js
 node --check lib/locale.js
 node --check lib/timezone.js
-node --check popup.js
+node --check gate.js
 ```
 
 After changing files, reload the extension in `chrome://extensions`.

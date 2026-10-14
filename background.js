@@ -329,3 +329,14 @@ self.notmePrepareEnvironment = async (network, settings, selection) => {
   return { checks, override };
 };
 importScripts('lib/guard.js');
+
+async function openEnvironmentPage(tab) {
+  const page = chrome.runtime.getURL('gate.html');
+  if (tab.url?.startsWith(page)) return;
+  const existing = (await chrome.tabs.query({ url: page + '*' })).find(item => item.url === page + '?settings');
+  if (existing) {
+    await chrome.tabs.update(existing.id, { active: true });
+    await chrome.windows.update(existing.windowId, { focused: true });
+  } else await chrome.tabs.create({ url: page + '?settings' });
+}
+chrome.action.onClicked.addListener(openEnvironmentPage);

@@ -28,6 +28,18 @@ The extension currently spoofs:
 
 ## Runtime flow
 
+### Shared environment page
+
+`gate.html` is both the navigation gate and the options page. The toolbar opens
+or focuses that same page without a separate popup. Without a pending navigation
+it edits defaults and cannot authorize a site visit. Advanced fields save immediately;
+changing admission parameters invalidates the displayed check and runs a fresh one.
+Check deduplication includes the settings fingerprint to avoid reusing a probe started
+with old parameters. `settings.guardDefaults` stores the seven selected defaults;
+saving also updates ordinary-site flags except identity, which has a separate control.
+Saving WebRTC defaults changes the browser-wide policy. The all-spoof and all-native
+presets remain available even after custom defaults have been saved.
+
 ### Anthropic navigation admission
 
 `guard-rules.json` redirects protected main-frame requests to `gate.html` and
@@ -77,7 +89,7 @@ location/timezone/language surfaces need geographic profile data. Forced timezon
 use `buildManualOverride`, as ordinary notme does. A selection signature rejects
 outdated checks when the user changes controls during a probe. WebRTC uses
 Chrome's browser-wide privacy setting, applied on confirmation; the latest
-confirmed setting persists for the browser session unless changed in the popup.
+confirmed setting persists for the browser session unless changed by saving defaults in the environment page.
 
 For the first protected document, the gate carries the checked profile in a URL
 fragment. `content-inject.js` consumes it synchronously at `document_start` and
@@ -151,7 +163,7 @@ The wrappers share one source of truth in `lib/timezone.js`:
 - `localWallToEpoch(tz, y, mo, …)` — the inverse, used by setters, the numeric constructor, and offset-less parsing, with a single DST re-check.
 - `nativeDateStrings(tz, date)` / `tzName` / `formatGMT` — reproduce the native `toString` layout, including the localized zone long name.
 
-Each Date wrapper is installed once and consults the live override state on every call, so toggling a switch in the popup takes effect without reloading the page and wrappers never stack. When a toggle is off (or override data hasn't arrived) every wrapper delegates to the captured native method.
+Each Date wrapper is installed once and consults the live override state on every call; wrappers never stack. When a toggle is off (or override data hasn't arrived) every wrapper delegates to the captured native method.
 
 ## Browser and device identity
 
@@ -290,7 +302,7 @@ node --check content-bridge.js
 node --check lib/providers.js
 node --check lib/locale.js
 node --check lib/timezone.js
-node --check popup.js
+node --check gate.js
 ```
 
 Manual browser verification:
@@ -298,7 +310,7 @@ Manual browser verification:
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
 3. Load this directory as an unpacked extension.
-4. Trigger refresh in the popup.
+4. Trigger refresh in the environment page.
 5. On a test page, verify:
    - `navigator.geolocation.getCurrentPosition(...)`
    - `navigator.language`

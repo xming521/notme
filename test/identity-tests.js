@@ -142,6 +142,7 @@ async function main() {
         storage: { local: { async set(value) { Object.assign(stored, plain(value)); } } },
         declarativeNetRequest: { async updateDynamicRules(value) { calls.push(plain(value)); } },
         runtime: { onInstalled: listener, onStartup: listener, onMessage: listener }, alarms: { onAlarm: listener },
+        action: { onClicked: listener },
       },
     });
     ctx.self = ctx;
