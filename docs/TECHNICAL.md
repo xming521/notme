@@ -80,6 +80,8 @@ No response remains unknown. The result reflects the current policy; the chosen
 WebRTC setting still applies only on confirmation.
 
 `lib/guard.js` keeps the pending target and profile per tab in session storage.
+The gate URL fragment also retains the destination for browser restart recovery;
+recovery creates a fresh checking state without restoring admission.
 Every main-frame navigation creates a fresh check. Target traces, third-party
 test traces, default IP-provider responses, geolocation responses and every
 STUN public IP feed `NotmeNetwork.applyExitPolicy`. Only mainland China (`CN`)
@@ -281,8 +283,8 @@ switches can restore any surface to the browser default:
 Other sites retain native APIs and headers. The two exact verification hosts
 also enter the per-navigation guard. Static rules 3 and 4 use exact host regexes
 so unrelated Vercel applications and subdomains stay native. Their preflight
-sends no request to the verification host: third-party IP observations provide
-a labeled reference for profile preparation, alongside UDP and HTTP/3 diagnostics.
+sends no request to the verification host: `claude.ai/cdn-cgi/trace` provides
+the labeled Claude exit for profile preparation, alongside UDP and HTTP/3 diagnostics.
 Their header rule is limited to the approved tab and exact destination host.
 All protected pages receive the admitted tab profile synchronously in the entry
 fragment, including the first inline script. Saved defaults only preselect the

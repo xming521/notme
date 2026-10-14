@@ -1,8 +1,102 @@
 [
-  { "id": 1, "priority": 10, "action": { "type": "block" },
-    "condition": { "requestDomains": ["anthropic.com", "claude.ai", "claude.com", "claude.app", "claudeusercontent.com", "claudemcpcontent.com", "claude.site"], "excludedResourceTypes": ["main_frame"] } },
-  { "id": 2, "priority": 20, "action": { "type": "redirect", "redirect": { "extensionPath": "/gate.html" } },
-    "condition": { "requestDomains": ["anthropic.com", "claude.ai", "claude.com", "claude.app", "claudeusercontent.com", "claudemcpcontent.com", "claude.site"], "resourceTypes": ["main_frame"] } },
-  {"id":3,"priority":10,"action":{"type":"block"},"condition":{"regexFilter":"^(https?|wss)://(fuck-claude\\.vercel\\.app|fuck-claude\\.app)\\.?(?::[0-9]+)?/","excludedResourceTypes":["main_frame"]}},
-  {"id":4,"priority":20,"action":{"type":"redirect","redirect":{"extensionPath":"/gate.html"}},"condition":{"regexFilter":"^(https?|wss)://(fuck-claude\\.vercel\\.app|fuck-claude\\.app)\\.?(?::[0-9]+)?/","resourceTypes":["main_frame"]}}
+  {
+    "id": 1,
+    "priority": 10,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "requestDomains": [
+        "anthropic.com",
+        "claude.ai",
+        "claude.com",
+        "claude.app",
+        "claudeusercontent.com",
+        "claudemcpcontent.com",
+        "claude.site"
+      ],
+      "excludedResourceTypes": [
+        "main_frame"
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 20,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/gate.html"
+      }
+    },
+    "condition": {
+      "requestDomains": [
+        "anthropic.com",
+        "claude.ai",
+        "claude.com",
+        "claude.app",
+        "claudeusercontent.com",
+        "claudemcpcontent.com",
+        "claude.site"
+      ],
+      "resourceTypes": [
+        "main_frame"
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "priority": 10,
+    "action": {
+      "type": "block"
+    },
+    "condition": {
+      "regexFilter": "^(https?|wss)://(fuck-claude\\.vercel\\.app|fuck-claude\\.app)\\.?(?::[0-9]+)?/",
+      "excludedResourceTypes": [
+        "main_frame"
+      ]
+    }
+  },
+  {
+    "id": 4,
+    "priority": 20,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/gate.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^(https?|wss)://(fuck-claude\\.vercel\\.app|fuck-claude\\.app)\\.?(?::[0-9]+)?/",
+      "resourceTypes": [
+        "main_frame"
+      ]
+    }
+  },
+  {
+    "id": 5,
+    "priority": 30,
+    "action": {
+      "type": "allow"
+    },
+    "condition": {
+      "requestDomains": [
+        "anthropic.com",
+        "claude.ai",
+        "claude.com",
+        "claude.app",
+        "claudeusercontent.com",
+        "claudemcpcontent.com",
+        "claude.site"
+      ],
+      "regexFilter": "^https://[^/]+/cdn-cgi/trace(?:\\?.*)?$",
+      "isUrlFilterCaseSensitive": true,
+      "resourceTypes": [
+        "xmlhttprequest"
+      ],
+      "requestMethods": [
+        "get"
+      ]
+    }
+  }
 ]

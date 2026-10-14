@@ -153,13 +153,13 @@ function renderNetwork(view) {
   const average = reachable.length ? Math.round(reachable.reduce((sum, probe) => sum + probe.durationMs, 0) / reachable.length) : null;
   const connection = report.checks?.find(check => check.name === 'HTTP 连通性');
   const targetExits = probes.flatMap(probe => probe.trace ? [probe.trace] : []);
-  const host = new URL(view.target).hostname;
+  const host = report.host || new URL(view.target).hostname;
   const targetStatus = report.traceSource ? 'info' : report.networkStatus === 'fail' ? 'fail' : connection?.status || 'info';
   const target = networkCard('target-network', report.traceSource ? '检测站连接' : '目标站出口', host, targetStatus,
     report.traceSource ? '待确认' : targetStatus === 'fail' ? '连接失败' : targetStatus === 'warn' ? '连接提示' : report.trace ? '已获取' : '未验证',
     targetExits, probes.length ? [['平均延迟', average === null ? '—' : average + ' ms'], ['响应', `${reachable.length}/${probes.length}`],
       ['HTTP 状态', [...new Set(reachable.map(probe => probe.status))].join(' / ') || '—']] : [],
-    report.traceSource ? '确认前不请求检测站，环境通过第三方网络检查准备。' : connection?.blocking ? connection.detail : '',
+    host !== new URL(view.target).hostname ? '检测 Claude 网络出口；确认后进入原检测站。' : connection?.blocking ? connection.detail : '',
     report.traceSource ? '确认后连接' : '未取得出口 IP');
   const thirdParty = report.thirdPartyHTTP3 || {};
   const cloudflareTrace = thirdParty.trace;
@@ -208,7 +208,7 @@ function render(view) {
       overrideAddress: view.override?.enabled && view.override.lat === globalSnapshot.override?.lat
         ? globalSnapshot.state?.overrideAddress : null },
     override: view.override?.enabled ? view.override : null,
-  }, view.report?.traceSource || `目标站 ${new URL(view.target).hostname} 的 HTTPS 请求出口`);
+  }, view.report?.traceSource || `目标站 ${view.report?.host || new URL(view.target).hostname} 的 HTTPS 请求出口`);
   renderNetwork(view);
   $('#environment-errors').replaceChildren(...(view.report?.environmentChecks || []).filter(check => check.status === 'fail').map(check => {
     const error = document.createElement('p'); error.textContent = check.detail; return error;
@@ -324,8 +324,10 @@ $('#close').onclick = () => chrome.tabs.remove(tabId);
   tabId = (await chrome.tabs.getCurrent()).id;
   let view;
   if (!settingsOnly) {
-    for (let i = 0; i < 20; i++) { view = await send('STATE'); if (view) break; await new Promise(resolve => setTimeout(resolve, 100)); }
-    settingsOnly = !view || view.phase !== 'checking';
+    for (let i = 0; i < 20; i++) { view = await send('STATE', { target: new URLSearchParams(location.hash.slice(1)).get('target') }); if (view) break; await new Promise(resolve => setTimeout(resolve, 100)); }
+    if (view?.target) history.replaceState(null, '', '#target=' + encodeURIComponent(view.target));
+    if (!view) throw new Error('原访问地址未保存，无法恢复。请从浏览器历史记录重新打开原页面。');
+    settingsOnly = view.phase !== 'checking';
   }
   const snapshot = await api({ type: 'GET_STATE' }); settings = snapshot.settings; globalSnapshot = snapshot;
   defaults = NotmeEnvironment.defaultSelection({ ...settings, enabled: true, webrtcProtect: true, guardDefaults: null });

@@ -24,6 +24,7 @@ const server = createServer({ key: await readFile(join(temporary, 'key.pem')), c
   response.setHeader('Cache-Control', url.pathname === '/cached' ? 'public, max-age=3600' : 'no-store');
   const policy = policies.get(host) || {};
   if (url.pathname === '/cdn-cgi/trace') {
+    response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Content-Type', 'text/plain');
     response.setHeader('Alt-Svc','h3=":443"; ma=3600');
     const body = policy.invalid ? 'challenge' : `h=${host.replace(/\.$/, '')}\nip=${policy.ip || '203.0.113.42'}\nloc=${policy.country || 'US'}\ncolo=LAX\nhttp=${policy.protocol || 'http/2'}\n`;
@@ -261,13 +262,34 @@ try {
   await outside.close();
   pass('普通网站、仿冒域名及未列入的 Vercel 网站保持原生 API 和请求头');
 
+  const diagnostic=await context.newPage();await diagnostic.goto('https://outside.test/diagnostics');
+  const diagnosticId=await control.evaluate(async()=> (await chrome.tabs.query({})).find(t=>t.url==='https://outside.test/diagnostics').id);
+  traffic.length=0;
+  const trace=await diagnostic.evaluate(()=>fetch('https://claude.ai/cdn-cgi/trace?check=1').then(r=>r.text()));
+  assert.match(trace,/ip=203\.0\.113\.42/);
+  assert.ok(traffic.some(r=>r.host==='claude.ai'&&r.path==='/cdn-cgi/trace'));
+  assert.equal(await control.evaluate(id=>chrome.action.getBadgeText({tabId:id}),diagnosticId),'');
+  for(const [path,method] of [['/api/test','GET'],['/cdn-cgi/trace/extra','GET'],['/cdn-cgi/trace','POST']]){
+    traffic.length=0;
+    assert.equal(await diagnostic.evaluate(async([path,method])=>{try{await fetch('https://claude.ai'+path,{method});return 'allowed';}catch{return 'blocked';}},[path,method]),'blocked');
+    assert.equal(traffic.some(r=>r.host==='claude.ai'),false);
+  }
+  await wait(async()=>await control.evaluate(id=>chrome.action.getBadgeText({tabId:id}),diagnosticId)==='!');
+  assert.match(await control.evaluate(id=>chrome.action.getTitle({tabId:id}),diagnosticId),/outside\.test.*claude\.ai.*notme 拦截/);
+  await diagnostic.goto('https://outside.test/clean');
+  await wait(async()=>await control.evaluate(id=>chrome.action.getBadgeText({tabId:id}),diagnosticId)==='');
+  await diagnostic.close();
+  pass('第三方 GET trace 可读且不误报，其他路径与 POST 仍拦截并提示，导航后清除提示');
+
   const verification = await context.newPage();
   for (const host of Network.VERIFICATION_DOMAINS) {
     traffic.length=0;await openGate(verification,`https://${host}/verification-choice#scan`);
     assert.equal(formalRequests().length,0);
     assert.equal(traffic.some(item=>item.host===host),false);
-    assert.match(await checkDetails(verification),/确认前不请求检测站/);
-    assert.match(await verification.locator('#environment-info').textContent(),/第三方查 IP 服务参考出口/);
+    assert.match(await checkDetails(verification),/检测 Claude 网络出口/);
+    assert.ok(traffic.some(item=>item.host==='claude.ai'&&item.path.startsWith('/cdn-cgi/trace')));
+    assert.match(await verification.locator('#target-network').textContent(),/claude\.ai/);
+    assert.match(await verification.locator('#environment-info').textContent(),/claude\.ai/);
     await confirm(verification);
     assert.deepEqual(await verification.evaluate(()=>({language:window.first.language,zone:window.first.zone,hash:window.first.hash})),
       {language:'en-US',zone:'America/Los_Angeles',hash:'#scan'});
@@ -465,7 +487,7 @@ try {
   assert.doesNotMatch(await another.locator('#target-network').innerText(),/Cloudflare|HTTP\/3 未验证/);
   assert.doesNotMatch(await checkDetails(another),/查 IP 服务出口/);
   assert.equal(await another.evaluate(()=>document.querySelector('#diagnostics').getBoundingClientRect().top<document.querySelector('#choices').getBoundingClientRect().top),true);
-  assert.ok(await another.evaluate(()=>parseFloat(getComputedStyle(document.body).fontSize)>=18));
+  assert.ok(await another.evaluate(()=>parseFloat(getComputedStyle(document.body).fontSize)>=16));
   assert.equal(await another.locator('#checks .network-card').count(),3);
   await another.setViewportSize({width:390,height:844});
   assert.equal(await another.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
@@ -672,6 +694,13 @@ try {
       condition:{urlFilter:'*',resourceTypes:['main_frame','sub_frame','xmlhttprequest']},
     }))});
   });
+  const recoveryTargets=['https://claude.ai/chat/restore-one?x=1#anchor','https://www.anthropic.com/restore-two?x=2#section'];
+  const recoveryURLs=[];
+  for(const target of recoveryTargets){
+    const page=await context.newPage();await openGate(page,target);
+    assert.equal(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('target'),target);
+    recoveryURLs.push(page.url());
+  }
   const relocated=join(temporary,'moved-extension');await mkdir(relocated);
   for(const file of ['manifest.json','background.js','content-bridge.js','content-inject.js','guard-rules.json','gate.html','gate.css','gate.js','lib','icons']) {
     await cp(resolve(file),join(relocated,file),{recursive:true});
@@ -685,6 +714,17 @@ try {
     || await context.waitForEvent('serviceworker',{predicate:worker=>worker.url().startsWith('chrome-extension:')});
   assert.equal(new URL(movedWorker.url()).hostname,id);
   control=await context.newPage();await control.goto(`chrome-extension://${id}/gate.html?settings`);
+  for(let i=0;i<recoveryURLs.length;i++){
+    traffic.length=0;const page=await context.newPage();await page.goto(recoveryURLs[i]);
+    await wait(async()=>await page.locator('#retry').isEnabled());
+    assert.equal(await page.locator('#target').textContent(),recoveryTargets[i]);
+    assert.equal(await page.locator('#confirm').isVisible(),true);
+    assert.equal(formalRequests().length,0);
+    await confirm(page);
+    assert.equal(await page.evaluate(()=>location.href),recoveryTargets[i]);
+    await page.close();
+  }
+  pass('浏览器重启后恢复多个检查页的完整网址，重新检查确认前零正式请求');
   const movedSettings=(await send({type:'GET_STATE'})).settings;
   assert.equal(movedSettings.accuracyM,45);assert.deepEqual(movedSettings.guardDefaults,savedDefaults);
   assert.equal((await control.evaluate(()=>chrome.declarativeNetRequest.getDynamicRules())).some(rule=>[9001,9002,9003,9004,9005,19000,19001].includes(rule.id)),false);

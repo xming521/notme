@@ -1,6 +1,6 @@
 {
   "name": "notme",
-  "version": "1.8.6",
+  "version": "1.8.8",
   "private": true,
   "scripts": {
     "test": "node test/run-tests.js && node test/identity-tests.js && node --test test/network-tests.js",

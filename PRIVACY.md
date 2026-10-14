@@ -107,7 +107,7 @@ scripts match Anthropic origins, the two exact verification hosts and inherited-
 
 ## A note on trust
 
-Content scripts run on the seven Anthropic roots and their subdomains, plus the exact hosts `fuck-claude.vercel.app` and `fuck-claude.app`. Verification sites also require selection and confirmation before every visit or reload. Before confirmation, the extension sends no request to those hosts; it prepares the profile from the listed third-party diagnostics and IP services. Their language and identity headers are modified only when selected; no other Vercel hosts are included.
+Content scripts run on the seven Anthropic roots and their subdomains, plus the exact hosts `fuck-claude.vercel.app` and `fuck-claude.app`. Verification sites also require selection and confirmation before every visit or reload. Before confirmation, the extension sends no request to those hosts; it checks `claude.ai/cdn-cgi/trace` and prepares the profile alongside the listed third-party diagnostics and IP services. Their language and identity headers are modified only when selected; no other Vercel hosts are included.
 Host permissions additionally allow the public IP/geolocation/map endpoints.
 The scripts do not read page contents. Header rules apply only within the approved tab to Anthropic destinations or the selected exact verification host. On upgrade, old global header rules and notme's old
 WebRTC privacy override are removed.
@@ -125,3 +125,7 @@ read and rebuild it yourself at any time.
 
 Any future change to this policy will be reflected in this file and noted in the
 changelog.
+
+The gate URL fragment retains the complete pending destination so browser session restoration can recover it. It stays in the local browser URL/history and is not sent as part of diagnostic requests. Restoring an address never restores admission; a fresh check and confirmation are required.
+
+The `declarativeNetRequestFeedback` permission observes actual rule matches in unpacked installations. Block notices show only the source and destination hostnames locally, without URL paths or query parameters. The `notifications` permission displays the notice; a per-tab session flag deduplicates it until navigation or tab closure. No additional content scripts or host permissions are added.
