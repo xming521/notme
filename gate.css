@@ -27,7 +27,7 @@ summary > span { font-size: 16px; font-weight: 400; color: var(--muted); margin-
 details section { border: 0; border-radius: 0; }
 #diagnostics { box-shadow: 0 3px 15px #24324706; }
 #diagnostics > summary { border-bottom: 1px solid #edf0f4; }
-#checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 20px; }
+#checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 20px; }
 .network-card { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: #fcfdfe; color: #243247; }
 .card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .card-heading b { font-size: 16px; line-height: 1.5; }
@@ -87,10 +87,6 @@ button:disabled { opacity: .45; cursor: default; }
 button:focus-visible, summary:focus-visible { outline: 3px solid #649fc3; outline-offset: 3px; }
 footer { color: var(--muted); font-size: 16px; border-top: 1px solid var(--line); margin-top: 16px; padding-top: 20px; }
 [hidden] { display: none !important; }
-@media (max-width: 960px) {
-  #checks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  #udp-network { grid-column: 1 / -1; }
-}
 @media (max-width: 620px) {
   main { padding: 22px 16px; }
   header > span { font-size: 15px; }

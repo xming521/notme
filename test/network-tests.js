@@ -160,6 +160,88 @@ test('缺少任一协议的实测出口时显示未验证，不能把单协议�
   }
 });
 
+test('IPv6 探测使用专用端点，规范化地址且不发送凭据', async () => {
+  const calls = [];
+  const result = await Network.probeIPv6(Network.DEFAULT_SETTINGS, async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ ip: '2001:0db8:0000::42' }));
+  });
+  assert.equal(result.ip, '2001:db8::42');
+  assert.equal(calls.length, 1);
+  const { url, options } = calls[0];
+  assert.equal(url, 'https://api6.ipify.org/?format=json');
+  assert.equal(options.credentials, 'omit');
+  assert.equal(options.referrerPolicy, 'no-referrer');
+  assert.equal(options.cache, 'no-store');
+  assert.equal(options.redirect, 'manual');
+});
+
+test('IPv6 探测拒绝 IPv4、无效响应和 HTTP 错误，失败或超时保持未验证', async () => {
+  for (const response of [
+    new Response('{"ip":"203.0.113.42"}'), new Response('{"ip":"not-an-ip"}'),
+    new Response('challenge'), new Response('{}'), new Response('', { status: 503 }),
+  ]) {
+    const result = await Network.probeIPv6(Network.DEFAULT_SETTINGS, async () => response);
+    assert.equal(result.ip, null);
+    assert.ok(result.error);
+  }
+  const failed = await Network.probeIPv6(Network.DEFAULT_SETTINGS, async () => { throw new Error('connection failed'); });
+  assert.equal(failed.ip, null);
+  assert.equal(failed.error, 'connection failed');
+  const timeout = await Network.probeIPv6({ ...Network.DEFAULT_SETTINGS, timeoutMs: 5 }, (_, options) =>
+    new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')))));
+  assert.equal(timeout.ip, null);
+  assert.equal(timeout.error, 'IPv6 探测超时');
+  const stalledBody = await Network.probeIPv6({ ...Network.DEFAULT_SETTINGS, timeoutMs: 5 }, async (_, options) => ({
+    ok: true, json: () => new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')))),
+  }));
+  assert.equal(stalledBody.ip, null);
+  assert.equal(stalledBody.error, 'IPv6 探测超时');
+});
+
+test('第三方 IPv6 检测到国外出口通过，否则警告，不改变目标站的访问判定', () => {
+  const target = { ...Network.assessProbes('claude.ai', [probe(), probe(), probe()]), ready: true };
+  for (const countryCode of ['US', 'CN', 'HK', null]) {
+    const checked = Network.withIPv6(target, { host: Network.IPV6_TEST_HOST, ip: '2001:db8::42', countryCode });
+    const diagnostic = checked.checks.find(check => check.name === 'IPv6 出口（第三方参考）');
+    const available = countryCode && !['CN', 'HK'].includes(countryCode);
+    assert.equal(checked.regionBlocked, false);
+    assert.equal(checked.status, 'ok');
+    assert.equal(checked.ready, true);
+    assert.deepEqual(checked.exits, target.exits);
+    assert.equal(diagnostic.status, available ? 'ok' : 'warn');
+    assert.equal(diagnostic.blocking, false);
+    assert.equal(checked.trace, target.trace);
+    assert.match(diagnostic.detail, /不代表 Anthropic/);
+    if (!countryCode) assert.match(diagnostic.detail, /地区未确认/);
+  }
+  const unknown = Network.withIPv6(target, { host: Network.IPV6_TEST_HOST, ip: null, error: '连接失败' });
+  assert.equal(unknown.regionBlocked, false);
+  assert.equal(unknown.checks.find(check => check.name.startsWith('IPv6')).status, 'warn');
+  assert.match(unknown.checks.find(check => check.name.startsWith('IPv6')).detail, /IPv6 未验证/);
+});
+
+test('同一 IPv6 地址的地区查询冲突时警告，查询结果不进入访问拦截规则', () => {
+  const target = Network.assessProbes('claude.ai', [probe(), probe(), probe()]);
+  const checked = Network.withIPv6(target, { host: Network.IPV6_TEST_HOST, ip: '2001:db8::42', countryCode: 'US' },
+    [{ ip: '2001:0db8::42', countryCode: 'HK', source: 'IPv6 地区查询' }]);
+  assert.equal(checked.regionBlocked, false);
+  assert.equal(checked.ipv6.countryCode, 'HK');
+  assert.equal(checked.checks.find(check => check.name.startsWith('IPv6')).status, 'warn');
+  assert.doesNotMatch(checked.checks.find(check => check.name === '出口地区检查').detail, /IPv6 地区查询/);
+});
+
+test('第三方 IPv6 通过不会解除 Claude 实际 IPv4 或 IPv6 出口的地区拦截', () => {
+  for (const ip of ['203.0.113.42', '2001:db8::99']) {
+    const target = Network.assessProbes('claude.ai', [{ ...probe('CN'), trace: trace('CN', ip) }]);
+    const checked = Network.withIPv6(target, { host: Network.IPV6_TEST_HOST, ip: '2001:db8::42', countryCode: 'US' });
+    assert.equal(checked.checks.find(check => check.name.startsWith('IPv6')).status, 'ok');
+    assert.equal(checked.regionBlocked, true);
+    assert.equal(checked.status, 'fail');
+    assert.equal(checked.ready, false);
+  }
+});
+
 test('第三方 QUIC 探测先预热，再采信测试站实际 HTTP/3 响应，请求不携带凭据', async () => {
   const calls = [];
   const result = await Network.probeThirdPartyHTTP3(Network.DEFAULT_SETTINGS, async (url, options) => {
@@ -226,7 +308,7 @@ test('第三方 HTTP/3 比较标清来源，保留目标出口和访问判定，
     .checks.find(check => check.name.includes('第三方参考')).status, 'ok');
 });
 
-test('任意来源的任何一个大陆或香港 IPv4/IPv6 都拦截，后续正常结果不能覆盖已发现的限制地区', () => {
+test('参与地区拦截检查的任一大陆或香港 IPv4/IPv6 都拦截，后续正常结果不能覆盖已发现的限制地区', () => {
   const target = Network.assessProbes('claude.ai', [probe(), probe(), probe()]);
   for (const source of ['目标站', '第三方 HTTP/3', '第三方 UDP / STUN', '第三方查 IP 服务', 'IP 地理查询']) {
     for (const [ip, countryCode] of [['203.0.113.99', 'cn'], ['2001:db8::99', 'HK']]) {

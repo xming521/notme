@@ -31,6 +31,10 @@ const server = createServer({ key: await readFile(join(temporary, 'key.pem')), c
     response.setHeader('Alt-Svc','h3=":443"; ma=3600');
     const body = policy.invalid ? 'challenge' : `h=${host.replace(/\.$/, '')}\nip=${policy.ip || '203.0.113.42'}\nloc=${policy.country || 'US'}\ncolo=LAX\nhttp=${policy.protocol || 'http/2'}\n`;
     if (policy.delayMs) setTimeout(() => response.end(body), policy.delayMs); else response.end(body);
+  } else if (host === Network.IPV6_TEST_HOST) {
+    response.writeHead(policy.status || 200, { 'Content-Type': 'application/json' });
+    const body = policy.invalid ? 'challenge' : JSON.stringify({ ip: policy.ip || '2001:db8::42' });
+    if (policy.delayMs) setTimeout(() => response.end(body), policy.delayMs); else response.end(body);
   } else if (['ipwho.is', 'ipapi.co', 'ipinfo.io'].includes(host)) {
     const requested = Network.normalizeIP(decodeURIComponent(url.pathname.split('/')[1])) || '203.0.113.42';
     const geoPolicy = policies.get(`${host}/${requested}`) || policy;
@@ -613,13 +617,73 @@ try {
   assert.doesNotMatch(await checkDetails(another),/查 IP 服务出口/);
   assert.equal(await another.evaluate(()=>document.querySelector('#diagnostics').getBoundingClientRect().top<document.querySelector('#choices').getBoundingClientRect().top),true);
   assert.ok(await another.evaluate(()=>parseFloat(getComputedStyle(document.body).fontSize)>=16));
-  assert.equal(await another.locator('#checks .network-card').count(),3);
+  assert.equal(await another.locator('#checks .network-card').count(),4);
+  await another.setViewportSize({width:900,height:1050});
+  assert.equal(await another.evaluate(()=>document.querySelector('#udp-network').getBoundingClientRect().top
+    === document.querySelector('#ipv6-network').getBoundingClientRect().top),true);
   await another.setViewportSize({width:390,height:844});
   assert.equal(await another.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await another.setViewportSize({width:1100,height:1050});
   await mkdir('test-results',{recursive:true});await another.screenshot({path:'test-results/network-preview.png',clip:{x:0,y:0,width:1100,height:930}});
+  await another.locator('#checks').screenshot({path:'test-results/ipv6-preview.png'});
   pass('真实浏览器经本地 UDP/STUN 收到响应；HTTP/2 和 Alt-Svc 不会误报 HTTP/3');
   pass('网络检查置顶、字体清晰且窄屏不横向溢出，HTTP/2 回退仍显示 Cloudflare 出口，状态与来源不重复');
+
+  const ipv6Card = another.locator('#ipv6-network');
+  assert.match(await ipv6Card.innerText(), /2001:db8::42/);
+  assert.match(await ipv6Card.innerText(), /美国 · US/);
+  assert.match(await ipv6Card.innerText(), /通过/);
+  assert.match(await ipv6Card.innerText(), /不代表 Anthropic/);
+  assert.ok(traffic.some(item => item.host === Network.IPV6_TEST_HOST));
+  assert.ok(traffic.filter(item => item.host === Network.IPV6_TEST_HOST).every(item => !item.cookie));
+  pass('IPv4 目标站出口之外独立探测 IPv6，展示 IPv6 地址与地区并标明第三方参考');
+
+  for (const country of ['CN', 'HK']) {
+    policies.set('ipwho.is/2001:db8::42', { country });
+    traffic.length = 0; await openGate(another, `https://claude.ai/ipv6-${country}`);
+    await preset(another, '全部使用系统默认');
+    assert.equal(await another.locator('#confirm').isEnabled(), true);
+    assert.match(await ipv6Card.innerText(), /警告/);
+    assert.ok((await ipv6Card.getAttribute('class')).includes('warn'));
+    assert.match(await another.locator('#network-status').innerText(), /连接有提示/);
+    assert.equal(formalRequests().length, 0);
+  }
+  policies.delete('ipwho.is/2001:db8::42');
+  policies.set('ipinfo.io/2001:db8::42', { country: 'CN' });
+  await openGate(another, 'https://claude.ai/ipv6-conflicting-country');
+  assert.equal(await another.locator('#confirm').isEnabled(), true);
+  assert.match(await ipv6Card.innerText(), /中国大陆 · CN/);
+  assert.ok((await ipv6Card.getAttribute('class')).includes('warn'));
+  policies.delete('ipinfo.io/2001:db8::42');
+  pass('第三方 IPv6 只有大陆、香港或地区查询冲突时给出警告，正常目标站仍可确认');
+
+  for (const provider of ['ipwho.is', 'ipapi.co', 'ipinfo.io']) policies.set(`${provider}/2001:db8::42`, { invalid: true });
+  await openGate(another, 'https://claude.ai/ipv6-unknown-region');
+  assert.match(await ipv6Card.innerText(), /2001:db8::42/);
+  assert.match(await ipv6Card.innerText(), /地区未确认/);
+  assert.ok((await ipv6Card.getAttribute('class')).includes('warn'));
+  for (const provider of ['ipwho.is', 'ipapi.co', 'ipinfo.io']) policies.delete(`${provider}/2001:db8::42`);
+  pass('IPv6 地址有效而地区查询失败时保留地址，明确显示地区未确认');
+
+  for (const policy of [{ ip: '203.0.113.42' }, { status: 503 }]) {
+    policies.set(Network.IPV6_TEST_HOST, policy);
+    await openGate(another, 'https://claude.ai/ipv6-unverified');
+    assert.match(await ipv6Card.innerText(), /未验证/);
+    assert.match(await ipv6Card.innerText(), /警告/);
+    assert.equal(await ipv6Card.locator('.exit-ip').count(), 0);
+    assert.equal(await another.locator('#confirm').isEnabled(), true);
+  }
+  policies.delete(Network.IPV6_TEST_HOST);
+  pass('IPv6 测试失败或返回 IPv4 时显示未验证，不误报 IPv6 检测成功');
+
+  traffic.length = 0; await openGate(another, 'https://claude.ai/confirm-ipv6-region');
+  const ipv6Requests = traffic.filter(item => item.host === Network.IPV6_TEST_HOST).length;
+  policies.set('ipwho.is/2001:db8::42', { country: 'HK' });
+  await ageCheck(another);
+  await confirm(another);
+  assert.ok(traffic.filter(item => item.host === Network.IPV6_TEST_HOST).length > ipv6Requests);
+  policies.delete('ipwho.is/2001:db8::42');
+  pass('过期确认重新探测 IPv6，第三方结果变为香港时仅警告，正常目标站可访问');
 
   udpIP='203.0.113.99';traffic.length=0;await openGate(another,'https://claude.ai/udp-different');
   assert.match(await checkDetails(another),/203\.0\.113\.99/);

@@ -210,22 +210,32 @@ function renderNetwork(view) {
     protectedUDP ? '浏览器已限制非代理 UDP，未发送 STUN。' : udpExits.length && report.trace
       ? `与${report.traceSource ? '参考' : '目标站'}出口${udpMatches ? '相同' : '不同'}` : '未取得 STUN 响应。',
     protectedUDP ? 'WebRTC 防泄漏保护已生效' : 'UDP 出口未验证');
+  const ipv6 = report.ipv6 || {};
+  const ipv6Check = report.checks?.find(check => check.name === 'IPv6 出口（第三方参考）');
+  const ipv6Card = networkCard('ipv6-network', 'IPv6 出口', ipv6.host || '第三方测试服务', ipv6Check?.status || 'info',
+    ipv6Check?.status === 'ok' ? '通过' : '警告',
+    ipv6.ip ? [{ ip: ipv6.ip, country: ipv6.countryCode, protocol: 'HTTPS' }] : [], [],
+    (ipv6Check?.status === 'ok' ? '已检测到国外 IPv6 出口。' : '未检测到国外 IPv6 出口，仅作警告。')
+      + '第三方参考：仅代表到测试站的 IPv6 出口，不代表 Anthropic，可能因分流而不同。'
+      + (ipv6.ip ? '' : '请求失败不能确认 IPv6 是否可用。'),
+    'IPv6 未验证' + (ipv6.error ? '：' + ipv6.error : ''));
   const policy = document.createElement('div'); policy.id = 'network-policy';
   const unknown = [...new Set((report.exits || []).filter(exit => !exit.country).map(exit => exit.ip))].length;
   const noExits = !report.exits?.length;
   policy.className = 'policy-status ' + (report.regionBlocked ? 'fail' : unknown || noExits ? 'info' : 'ok');
   const title = document.createElement('b'); title.textContent = report.regionBlocked ? '检测到中国大陆 / 香港出口，禁止访问'
-    : noExits ? '尚未确认出口地区' : unknown ? '未发现受限出口，部分地区尚未确认' : '未发现中国大陆 / 香港出口';
+    : noExits ? '尚未确认出口地区' : unknown ? '地区拦截检查：部分地区尚未确认' : '地区拦截检查通过';
   policy.append(title);
   if (report.regionBlocked) {
     const blocked = document.createElement('p'); blocked.textContent = report.checks?.find(check => check.name === '出口地区检查')?.detail;
     policy.append(blocked);
   }
-  $('#checks').replaceChildren(target, cloudflare, stun, policy);
+  $('#checks').replaceChildren(target, cloudflare, stun, ipv6Card, policy);
   const failed = report.regionBlocked || report.networkStatus === 'fail';
+  const warning = report.networkStatus === 'warn' || ipv6Check?.status === 'warn';
   $('#network-status').textContent = failed ? '未通过'
-    : report.networkStatus === 'warn' ? '连接有提示' : '检查完成';
-  $('#network-status').className = 'status-badge ' + (failed ? 'fail' : report.networkStatus === 'warn' ? 'warn' : 'ok');
+    : warning ? '连接有提示' : '检查完成';
+  $('#network-status').className = 'status-badge ' + (failed ? 'fail' : warning ? 'warn' : 'ok');
 }
 function render(view) {
   navigationId = view.navigationId;
@@ -305,7 +315,7 @@ async function check() {
       return;
     }
     const policy = await chrome.privacy.network.webRTCIPHandlingPolicy.get({});
-    progress.step(1, '正在检测 HTTPS、HTTP/3 与 UDP');
+    progress.step(1, '正在检测 HTTPS、IPv6、HTTP/3 与 UDP');
     const [view, udp] = await Promise.all([
       send('CHECK', { selection: chosen }), NotmeUDP.probe({ policy: policy.value }),
     ]);

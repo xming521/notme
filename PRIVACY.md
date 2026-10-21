@@ -52,6 +52,16 @@ listed below, using the data needed for those checks.
     mainland China (`CN`) or Hong Kong (`HK`) blocks access regardless of source.
     Different IPs alone do not block access. Confirmation repeats the checks,
     including permitted STUN probes and their country lookups.
+11. Each preflight independently requests `api6.ipify.org/?format=json` without
+    cookies, credentials or a referrer, with an eight-second timeout. Only an
+    IPv6 address is accepted. The observed IPv6 address is sent to the listed
+    geolocation providers for country lookups. This separate availability check
+    passes when a foreign IPv6 exit is confirmed; mainland China, Hong Kong,
+    unknown or conflicting countries and failed probes produce a warning only.
+    These probe and lookup results do not participate in the access-blocking
+    region rule. The result is a third-party reference, not Anthropic's IPv6
+    exit, and does not enumerate all configured routes. Expired confirmation
+    results repeat this check.
 
 ## Network requests (the complete list)
 
@@ -64,11 +74,12 @@ listed below, using the data needed for those checks.
 | Requested host under `anthropic.com`, `claude.ai`, `claude.com`, `claude.app`, `claudeusercontent.com`, `claudemcpcontent.com`, `claude.site` | HTTPS connectivity and destination-exit check | GET `/cdn-cgi/trace`; no cookies or credentials |
 | `stun.cloudflare.com:3478/udp` | UDP response and exit-address diagnostic | STUN binding packets; the UDP source IP is visible to the service |
 | `cloudflare-quic.com` | Third-party HTTP/3 exit reference | GET `/cdn-cgi/trace`; no cookies, credentials or referrer; the connection's source IP is visible to the service |
+| `api6.ipify.org` | Independent third-party IPv6 exit diagnostic | GET `/?format=json`; no cookies, credentials or referrer; the connection's source IP is visible to the service |
 | `overpass-api.de`, `overpass.kumi.systems`, `maps.mail.ru/osm/tools/overpass` | Find nearby residential roads (OpenStreetMap) | The exit-IP latitude/longitude |
 | `api.bigdatacloud.net` | Reverse-geocode the chosen point for display | The chosen override latitude/longitude |
 
 These are the background endpoints used by the extension. Explicit destination-IP
-and STUN-IP lookups send those observed IPs to `ipwho.is`, `ipapi.co`, or `ipinfo.io`; these
+and STUN/IPv6-IP lookups send those observed IPs to `ipwho.is`, `ipapi.co`, or `ipinfo.io`; these
 services may see a different source IP under split routing. Host access is
 limited to the seven Anthropic roots, the two verification hosts and listed diagnostic providers. Content
 scripts match Anthropic origins, the two exact verification hosts and inherited-origin frames.
@@ -89,6 +100,8 @@ scripts match Anthropic origins, the two exact verification hosts and inherited-
   The UDP diagnostic retains only the resulting public-address summary, not SDP
   or host/mDNS candidate addresses. The third-party HTTP/3 diagnostic retains
   only the reported exit IP, country, data-center code, protocol and probe error.
+  The IPv6 diagnostic retains the test hostname, reported IPv6 address, country
+  and probe error for the current check.
   Region observations retain each detected IP, reported region and source for
   the current check, so a restricted result cannot be overwritten by a later
   allowed one. Unknown regions are recorded as unverified.
